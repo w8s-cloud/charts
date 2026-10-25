@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pi.name" . }}-files
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+data:
+  40-render.sh: |
+    {{- .Files.Get "files/40-render.sh" | nindent 4 }}
+  models.sh: |
+    {{- .Files.Get "files/models.sh" | nindent 4 }}
+  gateway.conf.template: |
+    {{- .Files.Get "files/gateway.conf.template" | nindent 4 }}
+  client.conf.template: |
+    {{- .Files.Get "files/client.conf.template" | nindent 4 }}
+  index.html: |
+    {{- .Files.Get "files/index.html" | nindent 4 }}

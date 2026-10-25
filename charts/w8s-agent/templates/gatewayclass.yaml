@@ -1,0 +1,56 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- if index .Values "envoy-gateway" "enabled" }}
+# Every w8s-managed cluster gets the same GatewayClass regardless of what
+# other Gateway API implementations the cluster already has installed, so
+# published-service routing behaves identically everywhere - no more
+# guessing a cluster-specific controller's entrypoint port or Service
+# naming convention (see agent/src/cloudflared.rs's gateway_address lookup).
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ .Values.gateway.className }}
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  {{- if or .Values.envoyProxy.serviceType .Values.envoyProxy.resources }}
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: {{ .Values.gateway.className }}-config
+    namespace: {{ .Values.gateway.namespace }}
+  {{- end }}
+---
+{{- if or .Values.envoyProxy.serviceType .Values.envoyProxy.resources }}
+# The Gateway's Envoy proxy Service: ClusterIP by default (values.yaml,
+# envoyProxy.serviceType), because cloudflared reaches the Gateway from
+# inside the cluster and nothing else needs to. Envoy Gateway's own default
+# is a LoadBalancer per Gateway - a cloud load balancer nobody uses on a
+# managed cluster, and on a single-node box a fight over port 80 (confirmed
+# live: a second LoadBalancer Service on the same node stays pending).
+# Note Envoy Gateway does not retype a Service that already exists: a
+# Gateway created under the old default keeps its LoadBalancer Service
+# until that Service is deleted and recreated by the controller.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: {{ .Values.gateway.className }}-config
+  namespace: {{ .Values.gateway.namespace }}
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      {{- with .Values.envoyProxy.serviceType }}
+      envoyService:
+        type: {{ . }}
+      {{- end }}
+      {{- with .Values.envoyProxy.resources }}
+      # The proxy container's requests and limits (values.yaml,
+      # envoyProxy.resources). Unset, Envoy Gateway requests 100m CPU and
+      # 512Mi memory for it, the largest single request in this chart.
+      envoyDeployment:
+        container:
+          resources:
+            {{- toYaml . | nindent 12 }}
+      {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

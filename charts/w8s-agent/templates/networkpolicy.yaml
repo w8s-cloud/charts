@@ -1,0 +1,149 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+Opt-in egress (and ingress) limits for the agent and the spoke relay;
+values.yaml's networkPolicy block lists what each allows. The API server
+is reached by whatever address the CNI sees after the kubernetes Service
+is resolved - a node or control-plane IP no pod selector matches - which
+is why TCP 443/6443 are allowed by port rather than by peer.
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # The import DNS zones the cluster's resolver forwards here.
+    - ports:
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+    {{- if .Values.observability.enabled }}
+    # The collectors' exports (otlp_forward.rs), from this release's own
+    # collectors only.
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - {{ include "w8s-agent.otelName" . }}
+                  - {{ printf "%s-node" (include "w8s-agent.otelName" .) }}
+      ports:
+        - protocol: TCP
+          port: 4319
+    {{- end }}
+    {{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+    {{- if $caps.kubectl.enabled }}
+    # The kube gateway (kube_gateway.rs), from this cluster's relay only:
+    # people's kubectl arrives there over iroh.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "w8s-agent.relayName" . }}
+      ports:
+        - protocol: TCP
+          port: 8001
+    {{- end }}
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["169.254.169.254/32"]
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    # Anything in the cluster by pod: the spoke relay, tunnel backends,
+    # the CI registry.
+    - to:
+        - namespaceSelector: {}
+    {{- with .Values.networkPolicy.agentExtraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- $name := include "w8s-agent.relayName" . }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # Nothing dials the relay from outside: the hub and peer relays are
+    # reached outbound, and punched paths come back as replies to the
+    # relay's own packets.
+    # The NATS leaf's link to the hub (ADR-017), from the leaf only.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ printf "%s-nats" (include "w8s-agent.fullname" .) }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 7422
+    {{- if and (.Values.relay.serve | default dict).enabled (.Values.relay.serve | default dict).tlsSecret }}
+    # Serving other clusters (relay.serve): our iroh relay and the hub
+    # endpoint, from anywhere.
+    - ports:
+        - protocol: TCP
+          port: 8443
+        - protocol: UDP
+          port: 7842
+        - protocol: UDP
+          port: 8445
+    {{- end }}
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The hub relay, our iroh relay's QUIC address discovery, and peer
+    # relays at whatever port their NAT mapped (iroh hole punching).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["169.254.169.254/32"]
+      ports:
+        - protocol: UDP
+          port: 1
+          endPort: 65535
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["169.254.169.254/32"]
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    # Exported Services' backends, edges' tunnels (where the agent
+    # says), and the agent.
+    - to:
+        - namespaceSelector: {}
+    {{- with .Values.networkPolicy.relayExtraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

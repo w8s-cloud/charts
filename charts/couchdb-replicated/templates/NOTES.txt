@@ -1,0 +1,26 @@
+CouchDB for cluster {{ .Values.clusterId }}, database "{{ .Values.database }}".
+{{- if .Values.peers }}
+Pulling from: {{ join ", " .Values.peers }}.
+{{- range .Values.peers }}
+  {{ . }} -> {{ include "cr.peerHost" (dict "root" $ "peer" .) }}
+{{- end }}
+Each of those Services appears once that cluster has installed this chart
+and exported its CouchDB; until then the pull retries.
+{{- else }}
+No peers: this site is on its own until you set peers.
+{{- end }}
+
+Replication state:
+  kubectl -n {{ .Release.Namespace }} logs statefulset/{{ include "cr.name" . }}-couchdb -c replication
+{{- if and .Values.app.enabled .Values.app.hostname }}
+
+Guestbook: https://{{ .Values.app.hostname }} (the same hostname in every cluster)
+{{- else if .Values.app.enabled }}
+
+Guestbook:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cr.name" . }}-guestbook 8080:80
+{{- end }}
+{{- if .Values.isolate }}
+
+ISOLATED: this site is cut off from its peers (isolate=true).
+{{- end }}

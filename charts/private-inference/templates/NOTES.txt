@@ -1,0 +1,22 @@
+Private inference: role {{ .Values.role }}{{ with .Values.clusterId }} in {{ . }}{{ end }}.
+{{- if include "pi.gpu" . }}
+
+GPU side: Ollama with {{ join ", " .Values.ollama.models }} ({{ .Values.ollama.gpus }} GPU{{ if ne (int .Values.ollama.gpus) 1 }}s{{ end }}).
+The models are pulled on start; watch it with
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "pi.name" . }}-ollama -c models -f
+{{- if eq .Values.role "gpu" }}
+Exported as {{ .Values.gateway.serviceName }}: install role=client in your other clusters with
+client.gpuCluster set to this cluster's id and the same apiKey.
+{{- end }}
+{{- end }}
+{{- if include "pi.client" . }}
+
+Apps here call http://{{ .Values.client.serviceName }}.{{ .Release.Namespace }}.svc/v1/chat/completions
+(OpenAI-compatible) or /api/... (Ollama). They reach the model through
+  {{ include "pi.upstream" . }}
+{{- if .Values.client.hostname }}
+Chat page: https://{{ .Values.client.hostname }} (public: anyone who reaches it can use the model)
+{{- else }}
+Chat page: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Values.client.serviceName }} 8080:80
+{{- end }}
+{{- end }}

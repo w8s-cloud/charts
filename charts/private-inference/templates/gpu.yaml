@@ -1,0 +1,138 @@
+{{- if include "pi.gpu" . }}
+{{- $name := include "pi.name" . }}
+{{- $secret := include "pi.secretName" . }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-models
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+  annotations:
+    # Models are large and slow to pull again: an uninstall keeps them.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.ollama.storage.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.ollama.storage.size }}
+---
+# Ollama listens on localhost only; the gateway beside it is the one way
+# in, and it wants the key.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-ollama
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gpu
+spec:
+  replicas: 1
+  # One pod owns the GPU and the models volume at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gpu
+  template:
+    metadata:
+      labels:
+        {{- include "pi.labels" . | nindent 8 }}
+        app.kubernetes.io/component: gpu
+      annotations:
+        checksum/files: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/key: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.ollama.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.ollama.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ollama.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ollama
+          image: {{ .Values.ollama.image }}
+          imagePullPolicy: {{ .Values.ollama.pullPolicy }}
+          env:
+            - {name: OLLAMA_HOST, value: "127.0.0.1:11434"}
+            - {name: OLLAMA_KEEP_ALIVE, value: {{ .Values.ollama.keepAlive | quote }}}
+          resources:
+            requests:
+              {{- toYaml .Values.ollama.resources.requests | nindent 14 }}
+            limits:
+              {{- toYaml .Values.ollama.resources.limits | nindent 14 }}
+              {{- if gt (int .Values.ollama.gpus) 0 }}
+              nvidia.com/gpu: {{ .Values.ollama.gpus }}
+              {{- end }}
+          volumeMounts:
+            - {name: models, mountPath: /root/.ollama}
+        # Pulls the listed models and keeps them there (files/models.sh).
+        - name: models
+          image: {{ .Values.ollama.image }}
+          imagePullPolicy: {{ .Values.ollama.pullPolicy }}
+          command: ["sh", "/etc/w8s/models.sh"]
+          env:
+            - {name: OLLAMA_HOST, value: "127.0.0.1:11434"}
+            - {name: MODELS, value: {{ join " " .Values.ollama.models | quote }}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: files, mountPath: /etc/w8s/models.sh, subPath: models.sh}
+        - name: gateway
+          image: {{ .Values.gateway.image }}
+          env:
+            - {name: TEMPLATE, value: gateway.conf.template}
+            - name: API_KEY
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: apiKey}}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: files, mountPath: /etc/w8s/gateway.conf.template, subPath: gateway.conf.template}
+            - {name: files, mountPath: /docker-entrypoint.d/40-render.sh, subPath: 40-render.sh}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ $name }}-models
+        - name: files
+          configMap:
+            name: {{ $name }}-files
+            defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gateway.serviceName }}
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gpu
+  ports:
+    - {name: http, port: 80, targetPort: http}
+{{- if eq .Values.role "gpu" }}
+---
+# Your other clusters reach the gateway as
+# {{ .Values.gateway.serviceName }}--{{ .Release.Namespace }}--<this cluster>.
+apiVersion: multicluster.x-k8s.io/v1alpha1
+kind: ServiceExport
+metadata:
+  name: {{ .Values.gateway.serviceName }}
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+{{- end }}
+{{- end }}

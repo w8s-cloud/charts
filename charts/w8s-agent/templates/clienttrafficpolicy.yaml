@@ -1,0 +1,53 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- if and (index .Values "envoy-gateway" "enabled") .Values.envoyProxy.suppressServerHeader (.Capabilities.APIVersions.Has "gateway.envoyproxy.io/v1alpha1/ClientTrafficPolicy") }}
+# The .Capabilities check above: only rendered once the cluster actually
+# serves ClientTrafficPolicy. Helm validates every resource in the manifest
+# against the API server BEFORE it applies any of them, so a custom
+# resource whose CRD arrives in the same helm run fails with "no matches
+# for kind ... ensure CRDs are installed first" (confirmed live on GKE).
+# The default path is safe: gateway-helm ships its CRDs in a crds/
+# directory, which Helm pre-installs on a first `helm install` before it
+# builds .Capabilities, so this renders on the very first install of a
+# fresh cluster. The GKE path (envoy-gateway-crds.enabled=true) is not:
+# there the Envoy Gateway CRDs are ordinary templated resources that only
+# exist after the first upgrade, so this policy appears on the SECOND
+# upgrade. Helm never applies crds/ on `helm upgrade` either, so a
+# release that somehow lacks the CRD skips this instead of failing the
+# whole upgrade.
+#
+# Envoy's HTTP connection manager stamps a `Server: envoy` header onto every
+# response it sends - including the ones it generates itself, such as the
+# default 404 for a Host header that matched nothing (see
+# CreatePublishedServiceRequest/tunnel_ingress_rules in
+# crates/w8s-http/src/publishing.rs: Cloudflare Tunnel already forwards a
+# whole wildcard *.{cluster_domain} to this Gateway, so plenty of Host
+# headers reach Envoy with no matching HTTPRoute behind them). That header
+# is exactly the kind of fingerprint a scanner uses to flag "this is an
+# Envoy-fronted cluster worth a closer look" (W3T-21), independent of
+# whether the request otherwise gets a clean 404.
+#
+# ClientTrafficPolicy's `lateResponseHeaders` is Envoy Gateway's supported
+# way to mutate response headers at the HTTP-connection-manager level for
+# every route on a Gateway, so removing "Server" here strips it cluster-wide
+# rather than needing a per-HTTPRoute filter (which published services don't
+# define an HTTPRoute template hook for anyway).
+#
+# NOT verified against a live cluster - this sandbox has neither a
+# Kubernetes cluster nor a `helm` binary. See k8s/README.md for the header
+# check a human with real cluster access should run.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: {{ include "w8s-agent.gatewayName" . }}-suppress-server-header
+  namespace: {{ .Values.gateway.namespace }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ include "w8s-agent.gatewayName" . }}
+  headers:
+    lateResponseHeaders:
+      remove:
+        - Server
+{{- end }}
+{{- end }}

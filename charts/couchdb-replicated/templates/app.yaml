@@ -1,0 +1,93 @@
+{{- if .Values.app.enabled }}
+{{- $name := include "cr.name" . }}
+{{- $secret := include "cr.secretName" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-guestbook
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: guestbook
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-guestbook
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: guestbook
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: guestbook
+  template:
+    metadata:
+      labels:
+        {{- include "cr.labels" . | nindent 8 }}
+        app.kubernetes.io/component: guestbook
+      annotations:
+        checksum/files: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/auth: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.app.image }}
+          imagePullPolicy: {{ .Values.app.pullPolicy }}
+          env:
+            - name: COUCHDB_USER
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: username}}
+            - name: COUCHDB_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: password}}
+            - {name: CLUSTER_ID, value: {{ .Values.clusterId | quote }}}
+            - {name: PEERS, value: {{ join " " .Values.peers | quote }}}
+            - {name: DATABASE, value: {{ .Values.database | quote }}}
+            - {name: COUCHDB_ADDRESS, value: "{{ .Values.couchdb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local:5984"}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: files, mountPath: /etc/w8s/nginx.conf.template, subPath: nginx.conf.template}
+            - {name: files, mountPath: /docker-entrypoint.d/40-w8s-guestbook.sh, subPath: 40-w8s-guestbook.sh}
+            - {name: files, mountPath: /usr/share/nginx/html/index.html, subPath: index.html}
+      volumes:
+        - name: files
+          configMap:
+            name: {{ $name }}-files
+            defaultMode: 0755
+{{- if .Values.app.hostname }}
+---
+# The same hostname in every cluster: w8s serves it from all of them
+# (active/active), and the page says which one answered.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-guestbook
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.app.gateway.name }}
+      namespace: {{ .Values.app.gateway.namespace }}
+  hostnames:
+    - {{ .Values.app.hostname | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ $name }}-guestbook
+          port: 80
+{{- end }}
+{{- end }}

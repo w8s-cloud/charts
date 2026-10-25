@@ -1,0 +1,16 @@
+# Proves to ArtifactHub that oci://oci.w8s.cloud/charts/w8s-agent is ours,
+# which is what earns the Verified Publisher label. The id is issued by
+# ArtifactHub when the repository is added and is not a secret.
+#
+# This is an OCI repository, so ArtifactHub does not fetch this file over
+# HTTP the way it would for a classic chart repo: it reads it from the
+# registry, pushed as an artifact under the `artifacthub.io` tag of the
+# chart's own repository path:
+#
+#   oras push oci.w8s.cloud/charts/w8s-agent:artifacthub.io \
+#     --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+#     artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+#
+# Nothing in this repository does that push yet: ops/release-public
+# publishes the chart itself, not this metadata.
+repositoryID: 72cddabb-1fcc-437a-9e95-96eeb563eaeb

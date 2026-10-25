@@ -1,0 +1,584 @@
+apiVersion: v2
+name: w8s-agent
+description: w8s Kubernetes agent for QUIC control-plane connectivity and in-cluster reconciliation
+type: application
+# Chart version, bumped on every change to what a customer's `helm upgrade`
+# actually installs. 0.2.0 carries two RBAC additions in templates/rbac.yaml,
+# both of which fail as a 403 until the customer upgrades - this is a bump
+# they need, not bookkeeping:
+#   - batch/jobs gained create+delete, so the hub can dispatch a CI build Job
+#     into the cluster (docs/ci-in-cluster.md). Without it every build dies at
+#     ApplyManifest.
+#   - events became readable, so the hub can say *why* a workload is not
+#     running instead of rendering an empty panel.
+#
+# 0.3.0 adds the optional envoy-gateway-crds dependency below, for clusters
+# whose provider owns the Gateway API CRDs (GKE): the only way to get Envoy
+# Gateway's own CRDs without also fighting the provider over the Gateway
+# API ones. Without it the GKE install recipe in values.yaml
+# (envoy-gateway.crds.enabled=false) fails at ClientTrafficPolicy with
+# "no matches for kind ... ensure CRDs are installed first".
+#
+# 0.3.1 makes templates/clienttrafficpolicy.yaml wait for its CRD to be
+# served (.Capabilities check): 0.3.0 alone still failed the GKE upgrade
+# on the same error, because Helm validates the policy against the API
+# server before it applies the CRDs that arrive in that very run.
+#
+# 0.4.0 makes the public hub the default: agent.relayAddress is
+# relay.w8s.cloud:8443, agent.serverName relay.w8s.cloud, and the chart
+# renders its own CA Secret (ISRG Root X1) unless certificates.existingSecret
+# is set - so `helm install --set joinToken.value=...` is the whole install.
+# Anyone still pointing at an in-cluster relay with the old test CA has to
+# set all three explicitly now.
+#
+# 0.4.1 fixes a real bug in the 0.2.0 jobs RBAC grant: it added
+# create+delete on batch/jobs but not patch, so every single CI build still
+# 403'd at ApplyManifest exactly as 0.2.0 was meant to prevent -
+# apply_manifest does a server-side apply (a patch operation) for every
+# manifest it's handed, including a run's Job on its very first apply.
+# Already-installed clusters need `helm upgrade` to pick this up; CI builds
+# stay broken there until then.
+#
+# 0.5.0 adds `impersonate` on users and groups, which is what lets a customer
+# close port 6443 and reach the cluster through w8s instead: forwarded kubectl
+# requests then run as the person, evaluated against the customer's own RBAC
+# and named in their audit log, rather than as this agent. Without the upgrade
+# the forwarder gets a 403 from the API server on every request.
+#
+# 0.6.0 adds the cluster's OpenTelemetry Collector (templates/otel-collector.yaml,
+# W3T-191): on by default, a read-only ClusterRole of its own for the
+# k8s_cluster receiver, and a Service workloads can send OTLP to. Existing
+# installs get it on `helm upgrade`; observability.enabled=false opts out.
+# Also sets W8S_AGENT_NAMESPACE on the agent to the release namespace, so
+# the credential Secret the agent writes lands where this chart's other
+# objects are (it defaulted to w8s-system, which is also every documented
+# install's namespace, so nothing moves in practice).
+#
+# 0.7.0 lets the hub upgrade this release (W3T-192): the agent learns its
+# chart version, release name and ServiceAccount from the chart and runs
+# `helm upgrade` of itself as a Job when asked. RBAC gains write +
+# escalate/bind on roles and bindings for that (selfUpgrade.enabled=false
+# keeps it read-only). This is the last upgrade that has to be done by
+# hand.
+#
+# 0.8.0 adds the spoke relay (templates/relay.yaml, W3T-198): the agent
+# now dials a relay in its own cluster, which dials the hub with the
+# cluster's credential. Existing installs upgrade in place: the relay
+# reads the credential Secret the agent wrote and registers with it;
+# relay.enabled=false restores the direct agent-to-hub shape.
+#
+# 0.9.0 adds a per-node network/storage metrics DaemonSet
+# (templates/otel-collector-node.yaml, W3T-191 follow-up): the kubeletstats
+# receiver only sees its own node, so it needs one pod per node rather than
+# folding into the existing collector Deployment. Its own ServiceAccount/
+# ClusterRole (nodes/stats, nodes/proxy, read-only), on by default under
+# observability.enabled (observability.nodeMetrics.enabled=false opts out
+# independently of the main collector).
+#
+# 0.10.0 ships the Multi-Cluster Services API CRDs (templates/mcs-crds.yaml)
+# and lets the agent observe ServiceExports and manage ServiceImports
+# (W3T-199). serviceExports.installCrds=false for clusters that already
+# have the CRDs.
+#
+# 0.11.0 gives imported Services a name: `<svc>.<ns>.svc.cluster.<remote>`.
+# The agent serves those zones (W8S_DNS_LISTEN, templates/dns-service.yaml)
+# and wires the cluster's CoreDNS or kube-dns to forward them to it. No
+# object is created in the export's namespace any more.
+#
+# 0.12.0 has the spoke relay announce how it can be reached and measure its
+# NAT against the hub's probe port (W3T-194): relay.hubProbeAddress and
+# the pod IP from the downward API.
+#
+# 0.12.1 pulls both images Always while their tag is `latest`, so a chart
+# upgrade never restarts a pod on an older cached binary that does not know
+# the chart's new flags (GKE, 2026-09-20).
+#
+# 0.13.0 grants read-only get/list/watch on endpoints, endpointslices,
+# limitranges, resourcequotas and horizontalpodautoscalers (W3T-217): the
+# Explorer already lists and tries to browse every one of these, and
+# without this the only signal was a generic k8sproxy 403 rendered as a
+# bare "—" in its sidebar - already-installed clusters need `helm upgrade`
+# to pick this up; until then those five kinds keep showing "—" exactly as
+# before, not a new failure.
+#
+# 0.13.1 adds validatingadmissionpolicybindings alongside the policies
+# already in the admissionregistration rule, and write on both when
+# selfUpgrade is enabled. Envoy Gateway's crds subchart `lookup`s the
+# binding while templating, so without read a `helm upgrade` fails
+# before applying anything, with a 403 naming a resource nobody asked
+# for: "cannot get resource validatingadmissionpolicybindings at the
+# cluster scope". A cluster on 0.13.0 or earlier cannot upgrade itself
+# past this and needs one `helm upgrade` run by a human with their own
+# credentials to pick the rule up.
+#
+# 0.13.2 grants get on services/proxy for the CI registry Service alone,
+# so the hub can ask it how big a built image is - the hub has no route
+# into the pod network, and `services` does not cover the `proxy`
+# subresource. Named to one Service, because an unqualified grant here
+# reaches every Service in the cluster. Until a cluster upgrades, image
+# sizes read "unknown" exactly as they did before.
+#
+# 0.13.3 lets the node collector report each node's CPU in use
+# (k8s.node.cpu.usage) and memory working set, and accepts the
+# k8s.node.allocatable.* spelling beside allocatable_*. The hub's fleet
+# capacity reads these against allocatable, so utilization shows without
+# metrics-server or a scan. Until a cluster upgrades it shows no usage,
+# as before.
+#
+# 0.13.4 lets the agent read every custom resource (get/list/watch, any
+# API group), so the Custom Resources explorer can list the objects of
+# CRDs this chart has never heard of, not only the CRDs themselves.
+#
+# 0.14.0 lets the agent reconcile apps the hub declares for this cluster
+# (docs/app-deployments.md): the AppInstallation CRD
+# (templates/appinstallation-crd.yaml), and RBAC to manage those objects
+# and to let the Helm releases they describe create ServiceExports and
+# NetworkPolicies. Until a cluster upgrades, its apps show "the cluster did
+# not take the set" on the Apps page.
+#
+# 0.14.1 lets the hub delete an image from the cluster's own registry
+# (`delete` on services/proxy, that one Service only; W3T-261).
+#
+# 0.14.2 lets organization admins open a shell in a pod from the hub
+# (`create`/`get` on pods/exec; W3T-273). Until a cluster upgrades, the
+# terminal says the agent needs this chart.
+#
+# 0.14.3 makes the Gateway's Envoy Service ClusterIP by default: cloudflared
+# reaches the Gateway from inside the cluster, so a LoadBalancer per Gateway
+# was a cloud load balancer nobody used. A Gateway created under the old
+# default keeps its LoadBalancer Service until that Service is recreated.
+#
+# 0.14.4 adds imagePullSecrets (default empty) to the agent and spoke relay
+# pods, so a cluster that pulls the two w8s images from a private registry
+# can say which credential; the hub's own dogfood agent pulls from
+# registry.w8s.cloud with it. Nothing changes for a customer install.
+#
+# 0.15.0 pulls both images from registry.w8s.cloud by default, anonymously:
+# the hub's registry route lets anyone read exactly the w8s-agent and
+# w8s-relay repositories. ghcr has had no new build since CI moved into
+# the cluster, so a customer on the old default was on a frozen image.
+#
+# 0.15.1 is the agent that answers the hub's registry requests itself
+# (`RegistryRequest`): image reads, sizes and deletes go from the agent to
+# the registry's Service directly, since the API server's Service proxy
+# drops the registry credential. An older agent leaves the Images page
+# saying it needs this chart. The services/proxy grant on w8s-registry is
+# no longer used by the hub and can go in a later chart.
+#
+# 0.15.2 pins the agent and relay images by digest: image.digest and
+# relay.image.digest are filled in when the chart is packaged
+# (k8s/pin-images.sh), so a chart version runs exactly the
+# images it was released with, pulled IfNotPresent. The source chart
+# leaves them empty and follows the tag as before. rustLog defaults to
+# info (was debug), and the agent no longer logs kube proxy response
+# bodies at any level.
+#
+# 0.16.0 takes away what let this chart's ServiceAccount make itself
+# cluster-admin (templates/rbac.yaml):
+#   - the read-everything wildcard is gone. It matched every subresource
+#     too (nodes/proxy, pods/exec via a websocket GET). Built-in kinds are
+#     listed; custom resources are read by name from the CRDs present at
+#     install/upgrade (rbac.customResources: discovered | all | none).
+#   - `impersonate` on groups is limited to the w8s groups
+#     (rbac.impersonation.groups); the agent refuses `system:` users.
+#   - selfUpgrade.enabled defaults to false, and when enabled the upgrade
+#     Job runs as a ServiceAccount of its own. The agent's role no longer
+#     writes RBAC or admission policies at all. A cluster that relied on
+#     the hub's "Upgrade" button must set selfUpgrade.enabled=true again.
+#   - the unused services/proxy grant on the CI registry is dropped.
+#   - the node collector drops nodes/proxy (nodes/stats is enough for its
+#     config).
+#   - every pod runs non-root with a read-only root filesystem, no
+#     capabilities and RuntimeDefault seccomp; the agent's cloudflared and
+#     upgrade Job too.
+#   - networkPolicy.enabled (off by default) adds egress limits.
+#
+# 0.17.0 adds the `capabilities:` block (values.yaml): RBAC is rendered per
+# enabled capability, the agent gets the same block (W8S_CAPABILITIES),
+# refuses what is off with a message naming the setting, and reports the
+# set in its heartbeat so the cluster page can say "disabled by cluster
+# policy". The defaults keep every feature 0.16 had. Also:
+#   - the agent's own namespace objects (connector, token, Gateway,
+#     CloudflareTunnel, cluster credential, import Services) are granted
+#     by a Role there instead of cluster-wide, and the CoreDNS ConfigMaps
+#     by a named Role in kube-system;
+#   - explorer.write no longer includes nodes or PersistentVolumes;
+#   - rbac.impersonation (0.16.0) is now capabilities.kubectl;
+#   - capabilities.selfUpgrade.mode adds `approve`: the upgrade Job is
+#     created suspended for a cluster admin to resume.
+#     selfUpgrade.enabled=true still means auto.
+#
+# 0.18.0 is the agent that enforces a floor of its own (crates/w8s-agent/
+# src/policy.rs, tunnel_policy.rs): kube proxy requests as the agent never
+# reach proxy/exec/attach/portforward subresources, ServiceAccount tokens,
+# CSRs, RBAC/admission/CRD writes, or writes in kube-system and its own
+# namespace; ApplyManifest takes only what a w8s feature creates, where
+# it creates it, inside Pod Security baseline, and no longer takes over
+# fields another manager owns on an object w8s did not make; app charts
+# must come from https/oci/repo references (capabilities.apps.chartSources
+# narrows that) into allowed namespaces; tunnels go only to internal-route
+# backends or exported Services. Adds capabilities.explorer.namespaces.
+#
+# 0.19.0 keeps an in-cluster record of every hub command (crates/w8s-agent/
+# src/audit.rs): the last 500, allowed or refused, in the ConfigMap
+# w8s-agent-audit in the release namespace, and as info-level log lines.
+# RBAC gains that one ConfigMap (and `create` on ConfigMaps there).
+#
+# 0.20.0 adds install profiles (`profile`: connect | observe | manage |
+# admin), presets the `capabilities` block overrides key by key. admin is
+# the default, so an upgrade keeps what an install does. manage binds its
+# writes, app installs, CI and dev deployments by RoleBinding in
+# manage.namespaces, w8s-ci and w8s-dev only (creating the last two,
+# Pod Security baseline, when missing). `capabilities` now defaults to {}
+# and the profile supplies the values.
+#
+# 0.21.0 adds an opt-in ValidatingAdmissionPolicy keyed to the agent's
+# ServiceAccount (admissionPolicy.enabled, Kubernetes 1.30+): the API
+# server refuses the agent's RBAC/admission/CRD/CSR writes, kube-system
+# writes beyond the DNS ConfigMaps, and privileged or host-namespace pods.
+#
+# 0.22.0 brings in what main released alone as 0.16.0: the agent verifies the user's own token on kubectl requests
+# (W3T-200, values.yaml kubeProxy): it derives who to impersonate from a
+# token it verified against the hub's issuer, or passes the token through
+# (kubeProxy.identity=passthrough), instead of taking the relay's word.
+# No RBAC change. Until the hub forwards tokens, nothing changes in
+# behaviour; kubeProxy.requireUserToken=true then refuses requests that
+# name a person without one. Its defaults check the w8s-relay audience
+# and the cluster's organization (from the join token when
+# kubeProxy.oidc.organization is unset; the value is gone since 0.45.1,
+# the login decides), and take w8s:users and the role
+# group from the hub's per-organization Keycloak groups.
+#
+# 0.22.1: the agent scales its own OTel collectors to zero while Keycloak
+# rejects the cluster's credential (the cluster was removed or its client
+# lost), so they stop asking for a token several times a minute, and
+# brings them back once it is accepted again
+# (crates/w8s-agent/src/collector_guard.rs). RBAC: get/patch on those two
+# collectors, by name, in the release namespace.
+# 0.23.0 moves distribution to oci.w8s.cloud, a second, separate,
+# anonymous-pull public registry (docs/public-registry.md) - not
+# registry.w8s.cloud, the hub's own CI registry, which stays authenticated
+# and never held a chart. image.repository, relay.image.repository and
+# selfUpgrade.chartRepository all point there now; image.tag/relay.image.tag
+# are this chart's own version rather than a moving `latest`, so a chart
+# version always names one released image (pin: image/relay.image still
+# resolves the digest for it at package time, unchanged). Undoes #459's
+# route-level anonymous-read exception on registry.w8s.cloud
+# (`ci.registryAnonymousRepos`, removed) in favour of this: a registry with
+# no other traffic on it, that is anonymous-pull by its own construction
+# rather than by a credential injected into a route. An install still on
+# `https://charts.w8s.cloud`/`ghcr.io` keeps running unchanged; its own next
+# `helm upgrade` (by hand, once) is what picks this up -
+# chart_upgrade.rs handles both the classic and oci:// forms either way.
+#
+# 0.23.1 gives the agent container a HOME (/tmp). The image runs as
+# nobody with none, and helm - which the agent runs for app installs -
+# then tries to create its cache at /.cache and fails ("mkdir /.cache:
+# permission denied"), so no app could be installed. The agent binary
+# sets helm's own directories itself from this version on; the env here
+# fixes a pod still running an older image.
+#
+# 0.24.0 is the first version this chart shares with the hub chart
+# (k8s/charts/w8s-hub): the two are released together, major.minor in
+# step, and every w8s image - the two here, the hub's own - is tagged
+# with the version in the hub's CI registry (ops/deploy-hub/hub-images
+# <version> --tag-from <commit>) before either chart is deployed or
+# published. image.tag/relay.image.tag below is what ops/release-public
+# copies to oci.w8s.cloud under the same name.
+#
+# 0.25.0: CloudflareTunnel moves from the w8s.dev group to w8s.cloud, with
+# the rest of w8s's resources. The new CRD is a template (installed on
+# upgrade); the old one in crds/ is no longer shipped but stays where it
+# is installed. On its first connector reconcile the agent copies the
+# cluster's w8s.dev object into w8s.cloud, re-owns the cloudflared
+# Deployment by it, and deletes the old object with orphan propagation, so
+# the tunnel's pods keep running. The hub sends w8s.cloud from this chart
+# version on and w8s.dev before it; the agent also accepts w8s.dev from a
+# hub that has not caught up. RBAC: cloudflaretunnels in w8s.cloud
+# (read/write, status) and get/list/delete in w8s.dev.
+#
+# 0.26.0: no change to this chart's templates; released with hub chart
+# 0.26.0 (the two move together). The agent and relay images are the
+# 0.26.0 builds, carrying what main has had since 0.25.0.
+#
+# 0.27.0: no change to this chart's templates; released with hub chart
+# 0.27.0.
+#
+# 0.28.2: released with hub chart 0.28.2 (the two move together).
+# envoyProxy.resources sets the Envoy proxy's requests (empty keeps Envoy
+# Gateway's 100m/512Mi), for small nodes such as a Raspberry Pi. The agent
+# and relay images can now also be built for linux/arm64 when a build
+# asks (--param platforms=linux/amd64,linux/arm64); a default build is
+# amd64 only, as before.
+#
+# 0.29.0: released with hub chart 0.29.0.
+# - The cluster terminal (#600): `capabilities.shell` (on in the manage
+#   and admin profiles, needs kubectl.enabled) creates the w8s-shell
+#   namespace and a Role there for the agent; `shell.image` is
+#   oci.w8s.cloud/wctl-shell at this version, pinned by digest when the
+#   chart is packaged, like the agent and relay images.
+# - The agent reports CPU, memory and storage measured the platform's way
+#   (#597): on GKE Autopilot, the customer's own pods rather than
+#   Google's nodes. W8S_OTEL_ENDPOINT points it at the cluster's collector
+#   when observability is on.
+# - Secrets a CI pod takes from Secrets are masked as *** in its log
+#   before it leaves the cluster (#596). No chart change.
+# - The cluster scan runs as a Job of the w8s-clusterscan image
+#   (`scanner.image`, pinned by digest at packaging) under a read-only
+#   ServiceAccount of its own, created with capabilities.explorer.read;
+#   the agent writes and starts the Job, reads the report from its log
+#   and deletes it. The agent binary no longer contains the scanner.
+#
+# 0.30.0: released with hub chart 0.30.0; needs it (an older hub cannot
+# register this relay). Everything between the hub and the cluster now
+# goes over the control bus (ADR-017):
+# - The spoke relay registers its uplink with the cluster's NATS login,
+#   mounted from <release>-w8s-agent-nats-login (W8S_NATS_CREDS), or the
+#   join token before the cluster has one (#616). A cluster that joined
+#   before NATS logins needs one new join token, once.
+# - The agent talks only to its spoke relay: relay.enabled,
+#   agent.relayAddress, agent.serverName and agent.caPath are gone; the
+#   hub is relay.hubAddress / relay.hubServerName (#616).
+# - Pod shells and cluster terminals go over the bus (#615).
+# - Telemetry goes over the bus (#618): both collectors export to the
+#   agent (<release>-otlp-hub:4319), which forwards to the hub. The
+#   collectors hold no credential: observability.endpoint, tokenUrl,
+#   credentialSecret and waitImage, the wait-for-credential init
+#   containers and the w8s-agent-cluster-credential Secret are gone,
+#   and the relay's ServiceAccount has no API access.
+# - The agent refuses to start without W8S_NATS_URL and
+#   W8S_CONTROL_BUS_SECRET, which this chart always sets (#619).
+#
+# 0.32.1: released with hub chart 0.32.1. Fixes for reconnecting clusters
+# after the iroh-only hub (#640):
+# - HOME is set once in the agent's env, so Helm 4's server-side apply
+#   takes the Deployment (it refused 0.32.0: duplicate HOME).
+# - A saved login that does not say where the hub is gives way to a valid
+#   join token; before, a reinstall kept it and never reached the hub.
+# - The spoke relay starts its iroh endpoint again when a new join token
+#   replaces the one it started with; before, it kept offering the
+#   expired one to our relay until the pod restarted.
+#
+# 0.32.2: released with hub chart 0.32.2. No change to this chart's
+# templates. The relay image now carries the hub's own OpenTelemetry
+# export (#651), used only in hub mode: the spoke relay this chart runs
+# logs locally and ignores OTEL_* altogether, and the agent links no
+# exporter. Nothing of this cluster's own goes to the hub but what the
+# control bus carries.
+#
+# 0.32.3: released with hub chart 0.32.3.
+# - ownTelemetry.endpoint (#656), empty by default: for w8s's own
+#   clusters only. When set, the agent and the spoke relay export their
+#   own traces, metrics and logs over OTLP to that endpoint and nowhere
+#   else (W8S_OWN_OTLP_ENDPOINT; every OTEL_* endpoint is ignored). Left
+#   empty, as on every customer's install, both log locally exactly as
+#   before and send nothing. The cluster observability forwarding
+#   (`observability`) is unchanged.
+# - The agent answers a hub request in a span of its own that continues
+#   the hub's trace, only when the hub chose to send one: it does for the
+#   clusters in its W8S_TRACE_CLUSTERS, and for no other.
+# - The relay image's hub mode records spans and metrics for relay
+#   access, spoke admission and leaf links (#657); the spoke relay's
+#   instruments are no-ops without ownTelemetry.
+#
+# 0.32.4: released with hub chart 0.32.4. No change to this chart's
+# templates.
+# - The agent's own spans and metrics through its work (#665): a trace
+#   per background loop pass, per report and per session, the work of a
+#   hub request under its span, request and report durations. Exported
+#   only with ownTelemetry.endpoint; without it nothing is exported, and
+#   the agent's log takes events only, so its lines read as before. Loop
+#   failures now log as "<loop> failed: ...".
+# - With ownTelemetry, the agent's reports carry their trace context to
+#   the hub (#667), which continues it only for the clusters it lists as
+#   w8s's own.
+#
+# 0.32.5: released with hub chart 0.32.5. No change to this chart's
+# templates.
+# - With ownTelemetry, trace context crosses between the agent and its
+#   spoke relay on the cluster's own NATS leaf, both ways (#670): the
+#   relay taking imports joins the hub request's trace, and the agent's
+#   tunnel decisions join the relay's tunnel ask. Without it neither side
+#   sends any, and the requests are the plain ones they were.
+# - The spoke relay's log takes events only, like the agent's: a
+#   customer's relay log reads as before.
+#
+# 0.32.6: released with hub chart 0.32.6. No change to this chart or its
+# images' code: the version moves with the hub's, whose 0.32.5 subcharts
+# were published stale.
+#
+# 0.41.0: released with hub chart 0.41.0.
+# - profile: relay (a Leapfrog org's own hub in w8s's cluster): nothing
+#   cluster-scoped and nothing outside the release namespace is rendered,
+#   and the agent keeps its login and answers the bus but watches
+#   nothing. Needs envoy-gateway.enabled=false. Other profiles render as
+#   before.
+# - An app from the hub may carry a registry login for its chart
+#   (DesiredApp.registry_config), which the agent hands Helm as
+#   --registry-config: charts from a private registry install.
+#
+# 0.41.1: released with hub chart 0.41.1.
+# - Opt-in eBPF instrumentation of services (#706).
+# - The agent checks the Keycloak token an Explorer write now carries
+#   (#709): writes as the person work again.
+#
+# 0.42.0: released with hub chart 0.42.0.
+# - Spans go up: the collector's traces pipeline samples by trace id
+#   (observability.traces.samplePercent, 10) before the bus, and
+#   observability.traces.enabled=false removes the pipeline on a cluster
+#   (#711). The eBPF instrumentation's spans default on and go through
+#   the same pipeline.
+# - The eBPF instrumentation also counts every call per client-server
+#   pair (OBI's service graph feature), what the hub's Service map draws
+#   (#712); observability.ebpf.excludeNamespaces replaces the hard-coded
+#   never-instrumented list, same default (#714).
+#
+# 0.42.1: released with hub chart 0.42.1. The first release for a
+# Raspberry Pi (docs/raspberry-pi-edge.md):
+# - w8s-agent, w8s-relay and w8s-clusterscan are published as an index of
+#   linux/amd64 and linux/arm64 (#719 for the scanner; the agent and
+#   relay built this way since #567). wctl-shell stays amd64.
+# - A join token from another organization moves the cluster to it: the
+#   agent re-joins on the token, restarts its leaf, and restarts itself
+#   once the new login is written (#718).
+#
+# 0.42.2: released with hub chart 0.42.2. The AppInstallation CRD names
+# `spec.registryConfig`, which the agent has written since 0.41.0: a
+# cluster on a newer API server refused every app with a registry login
+# ("field not declared in schema", #724). Nothing else in the chart.
+#
+# 0.42.3: released with hub chart 0.42.3. The same chart as 0.42.2; the
+# version moves with the hub's.
+#
+# 0.43.1: released with hub chart 0.43.1. The same chart as 0.43.0; the
+# version moves with the hub's.
+#
+# 0.44.0: released with hub chart 0.44.0.
+# - Default access comes from the chart: access.groupBindings.enabled is
+#   true, binding org admins to admin and everyone to view cluster-wide,
+#   and developers to edit (cluster-wide, or in manage.namespaces when
+#   the install sets them). A saved policy on the Access page only adds
+#   (#750).
+# - People act as themselves: a person's identity is their verified
+#   token only, every upstream Impersonate-* header is dropped, users are
+#   w8s:<email> (kubeProxy.oidc.usernamePrefix), pod shells run as the
+#   person, and kubeProxy.requireUserToken is gone. A binding of your own
+#   to a bare email needs the w8s: prefix (#761).
+# - The agent checks itself after an upgrade, at startup and hourly, and
+#   reports it in its heartbeat (#755); it lists the requests it answers,
+#   so a newer hub says "upgrade the agent" instead of timing out (#775).
+# - Automatic upgrades, as far as capabilities.selfUpgrade.mode allows
+#   (#759, #760).
+# - AppInstallation values and registry logins live in a Secret the
+#   installation owns, not in its spec; older objects move on the next
+#   pass (#771).
+# - The leaf token Secret is kept on uninstall (#772).
+# - ownTelemetry takes resource attributes, for a Leapfrog stack's
+#   service.namespace (#774).
+# - capabilities.devDeploy and the w8s-dev namespace are gone (#756).
+#
+# 0.45.0: released with hub chart 0.45.0. No change to the agent; the
+# version moved with the hub's.
+#
+# 0.45.1: released with hub chart 0.45.1.
+# - The kube proxy takes this cluster's organization from the agent's own
+#   login (the hub's word), before the join token; kubeProxy.oidc.
+#   organization is gone, and one left in an older install's values is
+#   ignored. A cluster moved between organizations, or installed with a
+#   join token that names none, translates a person's groups for the
+#   right one. With orgGroupsRoot set and no organization known, no
+#   groups are read rather than Keycloak paths passed on untranslated,
+#   which the proxy's own group check refused ("impersonating group
+#   /w8s-orgs/... is not allowed") (#809, #813).
+# - A refused token's message names the client that issued it, for whom,
+#   and the groups it carried (#811).
+#
+# 0.45.2: released with hub chart 0.45.2. The agent image carries the
+# kube proxy changes the 0.45.1 paragraph describes: #813 merged after
+# the 0.45.1 release commit, so a 0.45.1 agent still read kubeProxy.oidc.
+# organization. The Explorer's edit of objects against the cluster's own
+# schema, with a server dry run before apply (#819).
+#
+# 0.45.3: released with hub chart 0.45.3. The Multi-Cluster Services
+# CRDs carry helm.sh/resource-policy: keep, so `helm uninstall` no
+# longer deletes every ServiceExport in the cluster with them (#807).
+#
+# 0.46.4: released with hub chart 0.46.4 (0.46.3 was never released
+# whole). A join token may say where its relay serves (#872); the agent
+# no longer reads a disconnected cluster as "older than 0.7.0" (#871).
+# The serving relay checks clusters' JWTs itself when given
+# relay.serve.operatorPublicKey (#875).
+version: 0.46.4
+# The agent binary's own version. Unchanged here: 0.5.0 is a chart-only
+# change, and the deployed image tag comes from values.yaml's image.tag
+# anyway, not from this field.
+appVersion: "0.1.0"
+
+# --- Discoverability metadata -------------------------------------------
+# Published to an OCI registry and listed on ArtifactHub, which ranks and
+# filters almost entirely on the fields below. Without keywords and an icon
+# a chart is effectively unfindable by search there, and lands in no
+# category at all - which is what happened to the first listing attempt.
+#
+# Deliberately absent: `artifacthub.io/license`. This repository has no
+# LICENSE file, and a licence annotation asserting one it does not have is
+# worse on a published chart than none. Add both together.
+#
+# Also deliberately absent: `artifacthub.io/changes`, which has to be
+# rewritten every release to stay true, and `artifacthub.io/signKey`, which
+# needs charts to actually be signed.
+home: https://w8s.cloud
+icon: https://www.w8s.cloud/favicon.svg
+sources:
+  - https://github.com/w8s-cloud/charts
+maintainers:
+  - name: w3t
+    url: https://w8s.cloud
+keywords:
+  - multi-cluster
+  - edge
+  - gateway-api
+  - serviceexport
+  - multicluster-services
+  - quic
+  - cloudflare-tunnel
+  - gitops
+  - envoy
+annotations:
+  artifacthub.io/category: integration-delivery
+  artifacthub.io/operator: "false"
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/links: |
+    - name: documentation
+      url: https://docs.w8s.cloud
+    - name: connect a cluster
+      url: https://docs.w8s.cloud/connect-a-cluster/
+    - name: chart reference
+      url: https://docs.w8s.cloud/reference/agent-chart/
+    - name: source
+      url: https://github.com/w8s-cloud/charts
+
+dependencies:
+  # Every w8s-managed cluster runs the same Gateway API controller
+  # regardless of what ingress the cluster already has, so published-service
+  # routing behaves identically everywhere (no more guessing a
+  # cluster-specific controller's entrypoint port/Service naming - see
+  # gatewayclass.yaml). Also installs the upstream Gateway API CRDs.
+  - name: gateway-helm
+    alias: envoy-gateway
+    version: "1.9.0"
+    repository: "oci://docker.io/envoyproxy"
+    condition: envoy-gateway.enabled
+  # Envoy Gateway's CRDs-only chart. gateway-helm's single `crds.enabled`
+  # switch covers BOTH its own CRDs (gateway.envoyproxy.io: EnvoyProxy,
+  # ClientTrafficPolicy, ...) and the upstream Gateway API CRDs, so on a
+  # cluster where the provider already owns the Gateway API CRDs and
+  # rejects a second copy (GKE) the only way to install just Envoy
+  # Gateway's own CRDs is this chart with crds.gatewayAPI.enabled=false.
+  # Off by default: when gateway-helm installs CRDs itself this would be a
+  # duplicate. Same upstream version as gateway-helm, keep them in step.
+  - name: gateway-crds-helm
+    alias: envoy-gateway-crds
+    version: "1.9.0"
+    repository: "oci://docker.io/envoyproxy"
+    condition: envoy-gateway-crds.enabled

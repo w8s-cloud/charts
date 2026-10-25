@@ -1,0 +1,29 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+{{- if $caps.kubectl.enabled }}
+{{- /*
+The Kubernetes API for verified people (crates/w8s-agent/src/kube_gateway.rs):
+plain HTTP inside the cluster, every request carrying the person's own
+token, which the agent verifies before it impersonates them. What reaches
+it is a person's kubectl through wctl, over iroh, by way of this cluster's
+relay (docs/iroh-transport.md).
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-kube" (include "w8s-agent.fullname" .) }}
+  labels:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: kube-gateway
+      port: 8001
+      targetPort: kube-gateway
+      protocol: TCP
+{{- end }}
+{{- end }}

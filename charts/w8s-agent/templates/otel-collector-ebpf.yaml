@@ -1,0 +1,212 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- if and .Values.observability.enabled .Values.observability.ebpf.enabled }}
+{{- /*
+Zero-code instrumentation at the node (docs/train-observability-addon.md
+item 1): OpenTelemetry's eBPF instrumentation (OBI, the former Grafana
+Beyla) as a DaemonSet. It reads HTTP, HTTP/2, gRPC and the common database
+protocols at the kernel and emits RED metrics (and spans, when asked) per
+service, with no change to any container in any language. Opt-in, and only
+for the namespaces named: it needs a privileged pod with the host's PID
+namespace, which is more than the rest of this chart ever asks for, and
+instrumenting everything would flood the hub's bounded window
+(crates/w8s-http/src/telemetry.rs) with series for workloads nobody asked
+about.
+
+It exports to this cluster's own collector (otel-collector.yaml), so the
+path to the hub is the one every other signal takes: collector, the agent's
+OTLP endpoint, the control bus. No new credential, nothing new leaving the
+cluster. Templated here rather than pulled in as the upstream
+opentelemetry-ebpf-instrumentation chart for the same reason the collector
+is: ~150 lines against a chart with its own config schema, presets and a
+metadata cache Deployment, none of which this needs.
+
+The config is OBI's v1 file format, which is what the pinned image reads.
+Bump the image and this config together.
+*/ -}}
+{{- $ebpf := .Values.observability.ebpf }}
+{{- if not $ebpf.namespaces }}
+{{- fail "observability.ebpf.enabled needs observability.ebpf.namespaces: the namespaces to instrument (a glob per entry; [\"*\"] for every namespace but the system ones)" }}
+{{- end }}
+{{- $name := printf "%s-ebpf" (include "w8s-agent.otelName" .) }}
+{{- $collector := printf "http://%s:4318" (include "w8s-agent.otelName" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.yml: |
+    log_level: info
+
+    discovery:
+      # Only what is opted in. Each entry is a glob on the namespace, so
+      # "shop-*" is one entry and "*" is everything the excludes below
+      # leave.
+      instrument:
+        {{- range $ebpf.namespaces }}
+        - k8s_namespace: {{ . | quote }}
+        {{- end }}
+      # Never OBI and the collectors themselves (recursion), nor the
+      # namespaces excluded in values (by default the platform's own:
+      # kube-*, this chart's, CI). Added to OBI's own default
+      # excludes, not replacing them.
+      exclude_instrument:
+        - exe_path: "{*ebpf-instrument*,*otelcol*}"
+        {{- with $ebpf.excludeNamespaces }}
+        - k8s_namespace: {{ printf "{%s}" (join "," .) | quote }}
+        {{- end }}
+      # A process that already exports OTLP itself is instrumented by its
+      # own SDK; a second copy of every request from the kernel would
+      # double-count it.
+      exclude_otel_instrumented_services: true
+
+    attributes:
+      # Service identity from Kubernetes metadata (the ClusterRole below),
+      # so a series belongs to a Deployment in a namespace, not to a PID:
+      # k8s.namespace.name, k8s.deployment.name, k8s.pod.name and
+      # k8s.node.name on the resource, which are exactly the ones the hub
+      # keeps (RESOURCE_ATTRS in telemetry.rs).
+      kubernetes:
+        enable: true
+      # Datapoint attributes cut to what rate, errors and latency per
+      # service need. OBI's defaults add the route, the peer address and
+      # more, each of which multiplies the series count for a breakdown
+      # nothing surfaces yet. Widen here, not in the hub's caps.
+      select:
+        http.server.request.duration:
+          include: [http.request.method, http.response.status_code]
+        http.client.request.duration:
+          include: [http.request.method, http.response.status_code, server.address]
+        rpc.server.call.duration:
+          include: [rpc.method, rpc.grpc.status_code]
+        rpc.client.call.duration:
+          include: [rpc.method, rpc.grpc.status_code, server.address]
+        db.client.operation.duration:
+          include: [db.system.name, db.operation.name, server.address]
+
+    metrics:
+      # The RED histograms, and the service graph: a request counter, a
+      # failed counter and a duration histogram per (client, server) pair,
+      # counted at the source from every request, not from the sampled
+      # spans - what the hub's Services page is drawn from. No
+      # request/response size histograms, no span metrics, no network
+      # flows (those need the host's network namespace too).
+      features: [application, application_service_graph]
+
+    otel_metrics_export:
+      endpoint: {{ $collector | quote }}
+      protocol: http/protobuf
+      interval: {{ $ebpf.interval }}
+    {{- if and $ebpf.traces .Values.observability.traces.enabled }}
+    otel_traces_export:
+      endpoint: {{ $collector | quote }}
+      protocol: http/protobuf
+    {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+rules:
+  # What OBI's Kubernetes decorator watches to name a process after its
+  # pod and owner (the upstream chart's ClusterRole, read-only throughout).
+  # Its own ServiceAccount, not the collector's: narrower blast radius if
+  # either is ever compromised, and this one runs privileged.
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # The ConfigMap is mounted, so a config change alone leaves the pod
+        # spec untouched; hash what it is rendered from to force the
+        # rollout.
+        checksum/config: {{ .Values.observability | toYaml | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      # The host's PID namespace is how it sees the processes it
+      # instruments at all; privileged (not the chart's
+      # containerSecurityContext) is what loading eBPF programs takes on
+      # every kernel this product targets. Root, not the chart's
+      # podSecurityContext: the probes attach as root. All of it is why
+      # this is opt-in and per namespace. The chart's own admission policy
+      # (admissionPolicy.enabled) guards what the *agent* creates, and the
+      # agent creates none of this, so the two do not conflict.
+      hostPID: true
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ebpf-instrument
+          image: {{ $ebpf.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: OTEL_EBPF_CONFIG_PATH
+              value: /etc/ebpf-instrument/config.yml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ebpf-instrument
+              readOnly: true
+          resources: {{- toYaml $ebpf.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+      # Every node, the control plane's included, same as the node
+      # collector: a single-node k3s box is the common shape here.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        {{- with .Values.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $ebpf.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

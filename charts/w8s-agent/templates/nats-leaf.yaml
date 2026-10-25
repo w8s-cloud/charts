@@ -1,0 +1,167 @@
+{{- $c := .Values.controlBus }}
+{{- $name := printf "%s-nats" (include "w8s-agent.fullname" .) }}
+{{- /*
+This cluster's NATS leaf (ADR-017): the w8s control bus, next to the
+agent. Everything here that speaks the bus - the agent, the relay, the
+scan Job - is a client of this server; the server keeps a link to the
+hub's NATS and forwards only the subjects someone on the other side
+subscribed to. Its own JetStream (a separate domain from the hub's) keeps
+what has to go up while the link is down.
+
+The hub link goes through this cluster's relay (its controlbus port,
+carried up the uplink to the hub's NATS leafnode port;
+crates/w8s-relay/src/control_bus.rs) unless controlBus.hubUrl names
+another. It logs in with the creds file the agent keeps
+(crates/w8s-agent/src/cluster_login.rs): the join token first, then the
+cluster's login, re-read on every connect.
+*/}}
+{{- $hub := $c.hubUrl | default (printf "nats-leaf://%s:7422" (include "w8s-agent.relayName" .)) }}
+{{- $remote := printf "leafnodes {\n  remotes: [ { url: %q, credentials: \"/etc/nats-login/user.creds\" } ]\n}\n" $hub }}
+{{- /* Only the agent and the relay are its clients: the token below, not
+every pod that can reach the Service, which would otherwise read the
+hub's requests to this cluster and publish to the hub as it. */}}
+{{- $conf := printf "server_name: $LEAF_NAME\nport: 4222\nhttp_port: 8222\nmax_payload: %s\nauthorization {\n  token: $W8S_NATS_TOKEN\n}\njetstream {\n  domain: %s\n  store_dir: /data\n  max_file_store: %s\n}\n%s" ($c.maxPayload | toString) $c.domain ($c.storage | toString) $remote }}
+{{- $token := include "w8s-agent.natsToken" . }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "w8s-agent.natsTokenSecretName" . }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    # Generated once (w8s-agent.natsToken: lookup keeps it on upgrade) and
+    # kept: an uninstall must not delete it, so a reinstall finds it again.
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  token: {{ $token | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  nats.conf: |
+{{ $conf | indent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ $conf | sha256sum | trunc 16 }}
+        checksum/token: {{ $token | sha256sum | trunc 16 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: nats
+          image: {{ $c.image.repository }}:{{ $c.image.tag }}
+          args: ["--config", "/etc/nats/nats.conf"]
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # The name the hub's NATS knows this leaf by. It refuses a
+            # second leaf of one name in one account, and every cluster of
+            # an org shares that org's account, so a name alike in every
+            # install (the pod's) had them knock each other off. The pod's
+            # UID is unique; JetStream keeps its data across a new one.
+            - name: POD_UID
+              valueFrom: { fieldRef: { fieldPath: metadata.uid } }
+            - name: LEAF_NAME
+              value: "$(POD_NAME)-$(POD_UID)"
+            {{- include "w8s-agent.natsTokenEnv" . | nindent 12 }}
+          ports:
+            - { name: client, containerPort: 4222 }
+            - { name: monitor, containerPort: 8222 }
+          readinessProbe:
+            httpGet: { path: "/healthz?js-enabled-only=true", port: monitor }
+          livenessProbe:
+            httpGet: { path: /healthz, port: monitor }
+            initialDelaySeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/nats }
+            - { name: data, mountPath: /data }
+            - { name: login, mountPath: /etc/nats-login, readOnly: true }
+      volumes:
+        - name: config
+          configMap: { name: {{ $name }} }
+        # Optional: the agent creates it after the leaf starts; until the
+        # file shows up the leaf retries the hub.
+        - name: login
+          secret:
+            secretName: {{ include "w8s-agent.controlBusSecretName" . }}
+            optional: true
+            items:
+              - { key: user.creds, path: user.creds }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $c.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $c.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - { name: client, port: 4222, targetPort: client }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - { name: client, port: 4222, targetPort: client }

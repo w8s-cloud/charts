@@ -1,0 +1,149 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- /*
+Roles for the people who use kubectl through w8s (docs-site/content/
+reference/cluster-access.md). The agent impersonates each person as the
+groups `w8s:users` (everyone) and their organization role's group,
+`w8s:org-admins` or `w8s:developers` (crates/w8s-http/src/
+kubectl_access.rs), and the API server applies this cluster's RBAC to
+those groups. These three ClusterRoles - `view`, `edit`, `admin` - are
+what gets bound to them, so a binding is one line per group rather than
+a rule list, and so the roles can grow with the chart (a new w8s CRD
+becomes readable by `view` in an upgrade, not in every customer's RBAC).
+Rendered only when kubectl through w8s is on (the manage and admin
+profiles); without it nobody reaches the API through w8s and the roles
+would bind nothing.
+
+Two ways to bind them, both only ever to these three:
+
+  - `access.groupBindings.enabled` renders the bindings here: org admins
+    to `admin` cluster-wide, everyone to `view` cluster-wide, and
+    developers to `edit` either cluster-wide or, when the install limits
+    writes to namespaces (manage.namespaces / explorer.namespaces), in
+    exactly those namespaces. On by default (docs/identity-separation.md,
+    Decisions 2): these are the defaults the Access page shows, and the
+    hub sends a cluster nothing until an admin saves a policy. Off, the
+    policy (or the customer's own bindings) alone decides.
+  - The organization's access policy, set on the hub's Access page: the
+    agent binds what it says (a role per group, a role per named person)
+    as `w8s-access-*` bindings (crates/w8s-agent/src/access_bindings.rs).
+    RBAC is additive: these add to the bindings above, never lower them.
+    Its RBAC lets it `bind` these three roles and no other (rbac.yaml),
+    and with admissionPolicy.enabled the API server refuses any binding
+    of its that is not one of these (admission-policy.yaml).
+
+Up to chart 0.32 the roles were named `-users`, `-developers` and
+`-org-admins`; a binding of your own to those names binds nothing after
+this upgrade and needs the new name.
+*/}}
+{{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+{{- if $caps.kubectl.enabled }}
+{{- $name := include "w8s-agent.fullname" . }}
+{{- $bind := .Values.access.groupBindings }}
+{{- $writeNs := $caps.explorer.namespaces | default list }}
+---
+# Read access, as Kubernetes' own `view` grants it (aggregated, so it
+# follows the cluster's version). Everyone's role with groupBindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-view
+  labels:
+    w8s.cloud/access-role: view
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules: []
+---
+# Kubernetes' own `edit`, aggregated the same way. Developers' role with
+# groupBindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-edit
+  labels:
+    w8s.cloud/access-role: edit
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.authorization.k8s.io/aggregate-to-edit: "true"
+rules: []
+---
+# Everything, the same as `cluster-admin`. Organization admins' role
+# with groupBindings: they are the people who connected the cluster and
+# can run helm against it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-admin
+  labels:
+    w8s.cloud/access-role: admin
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+  - nonResourceURLs: ["*"]
+    verbs: ["*"]
+{{- if $bind.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-users
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-view
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: w8s:users
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-org-admins
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-admin
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: w8s:org-admins
+{{- if $writeNs }}
+{{- range $ns := $writeNs }}
+---
+# Developers edit where the install lets w8s write, and nowhere else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-developers
+  namespace: {{ $ns }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-edit
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: w8s:developers
+{{- end }}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-developers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-edit
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: w8s:developers
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

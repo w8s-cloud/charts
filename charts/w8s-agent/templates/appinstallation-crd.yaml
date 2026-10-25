@@ -1,0 +1,88 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+# The apps the hub declared for this cluster (docs/app-deployments.md):
+# one AppInstallation per Helm release, written by the agent from the
+# hub's pushed set and reconciled by it. A template rather than crds/ so
+# `helm upgrade` installs it on clusters that predate it.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: appinstallations.w8s.cloud
+  annotations:
+    # Deleting the CRD would delete the objects without running their
+    # finalizers' uninstall; keep it on chart uninstall.
+    helm.sh/resource-policy: keep
+spec:
+  group: w8s.cloud
+  scope: Namespaced
+  names:
+    plural: appinstallations
+    singular: appinstallation
+    kind: AppInstallation
+    shortNames: [appinst]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: Namespace, type: string, jsonPath: .spec.releaseNamespace}
+        - {name: Revision, type: integer, jsonPath: .status.revision}
+        - {name: Chart, type: string, jsonPath: .spec.chart, priority: 1}
+        - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [releaseNamespace, chart, specHash]
+              properties:
+                releaseNamespace: {type: string}
+                chart: {type: string}
+                version: {type: string}
+                # The values Helm installs with, as JSON, in a key of the
+                # app's values Secret beside this object (owned by it, so
+                # deleted with it). A CR names a Secret, never holds a
+                # value: a Leapfrog stack's values hold the org's keys.
+                valuesSecretRef:
+                  type: object
+                  required: [name, key]
+                  properties:
+                    name: {type: string}
+                    key: {type: string}
+                # The chart registry's login (DesiredApp.registry_config), a
+                # docker config JSON the agent hands Helm as
+                # --registry-config, in a key of the same Secret; only an
+                # app from a private registry has one (the Leapfrog stacks,
+                # org_stack.rs).
+                registryConfigSecretRef:
+                  type: object
+                  required: [name, key]
+                  properties:
+                    name: {type: string}
+                    key: {type: string}
+                specHash: {type: string}
+                # Deprecated: values and registry login inline, as agents
+                # before the values Secret wrote them. Still in the schema so
+                # those objects stay valid, and an old agent still running
+                # during an upgrade can write; the agent moves them into the
+                # Secret and clears them on its next pass.
+                values:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                registryConfig: {type: string}
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Distributing, Ready, PartiallyReady, Failed]
+                message: {type: string}
+                revision: {type: integer, format: int64}
+                appliedHash: {type: string}
+                attemptedHash: {type: string}
+                attemptedAt: {type: integer, format: int64}
+                notes: {type: string}
+{{- end }}

@@ -1,0 +1,758 @@
+# Upgrading by hand: `helm upgrade w8s-agent w8s/w8s-agent --namespace
+# w8s-system --reset-then-reuse-values` (Helm 3.14+). Not `--reuse-values`:
+# that replays the previous release's computed values and never sees a
+# block a newer chart added (observability in 0.6.0, selfUpgrade in
+# 0.7.0), so the render fails with "nil pointer evaluating
+# interface {}.enabled". --reset-then-reuse-values takes this file's
+# defaults first and re-applies every --set you gave on top.
+replicaCount: 1
+
+image:
+  # The public OCI registry (docs/public-registry.md), a second, separate
+  # registry from registry.w8s.cloud - that one is the hub's own CI
+  # registry, holds every build of everything, and stays authenticated.
+  # This one holds only released public artifacts (this image, w8s-relay
+  # below, and the chart itself) and needs no credential at all: anonymous
+  # read is the registry's own property, not a route-level exception on
+  # some other registry. Not ghcr: nothing has pushed there since builds
+  # moved into the cluster, and those tags are frozen. Named
+  # `<git repository>/<image>` here as in the CI registry; releases up to
+  # 0.46.0 published `oci.w8s.cloud/w8s-agent`, which stays where it is.
+  repository: oci.w8s.cloud/w8s/w8s-agent
+  # The chart's own version, not `latest`: a released chart version always
+  # runs the image it was released with, and bumping the chart is what
+  # moves this forward - keep this in step with Chart.yaml's version by
+  # hand (ops/release-public publishes the image under this same tag,
+  # from the hub's CI registry where ops/deploy-hub/hub-images tagged it).
+  tag: "0.46.4"
+  # The image's content digest (sha256:...). Empty in the source chart;
+  # the published chart has it filled in for every chart version when the
+  # chart is packaged (k8s/pin-images.sh), so a chart version
+  # always runs the exact agent binary it was released with, and nothing
+  # that moves a tag in the registry changes what a cluster runs. To run
+  # something else, set digest (and tag) yourself, or set digest to "" to
+  # follow the tag.
+  digest: "" # pin: image
+  # Empty picks for you: IfNotPresent when pinned by digest, Always for the
+  # moving `latest` tag (a chart upgrade that adds a flag the binary must
+  # know otherwise restarts the pod on whatever image the node cached, and
+  # it crash-loops on the new argument - GKE, 2026-09-20), IfNotPresent
+  # for any other tag.
+  pullPolicy: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+# The agent's log filter (RUST_LOG). info records each command the hub
+# sends and how it ended, never a request or response body. debug is for a
+# troubleshooting session, not a default: it is also the level the HTTP and
+# Kubernetes client libraries log their own request details at.
+rustLog: info
+
+joinToken:
+  existingSecret: ""
+  secretKey: W8S_JOIN_TOKEN
+  value: ""
+
+certificates:
+  # Empty (default): the chart creates <release>-relay-ca holding caBundle
+  # below, so a bare `helm install --set joinToken.value=...` needs no
+  # out-of-band Secret. Set to an existing Secret name (with caKey inside)
+  # to pin a private CA instead, e.g. a local relay using generate_ca.sh.
+  existingSecret: ""
+  caKey: ca-cert.pem
+  # Trust anchors the agent verifies the relay against - every CERTIFICATE
+  # block in here counts. Default is ISRG Root X1, the Let's Encrypt root
+  # that signs relay.w8s.cloud's certificate. A public root, not a secret.
+  caBundle: |
+    -----BEGIN CERTIFICATE-----
+    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
+    -----END CERTIFICATE-----
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+  # Reading custom resources, for the Custom Resources explorer
+  # (templates/rbac.yaml says why this is not a wildcard any more):
+  #   discovered - read on the CRDs present at install/upgrade, by name
+  #   all        - every group and resource, subresources included
+  #   none       - CRDs are listed, their objects are not
+  customResources: discovered
+
+# What w8s may do in this cluster: an install profile, then any
+# capability set by hand on top of it. The chart renders RBAC only for what
+# is on, and the agent reads the same set (W8S_CAPABILITIES) and refuses a
+# disabled command itself, with a message naming the setting; the cluster
+# page lists what is off as "disabled by cluster policy". See the docs page
+# "What w8s can access in your cluster".
+#
+# Always on, whatever the profile - it is what connecting a cluster is:
+# the agent's own namespace objects (the cloudflared connector, its token,
+# the Gateway), reading Services and HTTPRoutes and writing HTTPRoutes (a
+# published route), observing ServiceExports, and the cluster DNS entries
+# for imported Services.
+#
+#   connect  just that
+#   observe  + read-only Explorer (no Secrets), logs, the cluster scan
+#   manage   + changes, a pod shell, kubectl as the person, apps, CI, dev
+#            deployments, internal tunnels - with writes and apps bound by
+#            RoleBinding in manage.namespaces only; no Secrets
+#   admin    every feature, cluster-wide (the default, so an upgrade keeps
+#            what an existing install does)
+#   relay    none of it, not even connecting: the agent keeps the cluster's
+#            login and its relay serves, and the chart renders nothing
+#            outside the release namespace (needs envoy-gateway.enabled
+#            false). A Leapfrog org's own hub in w8s's cluster, which w8s
+#            installs (crates/w8s-http/src/org_stack.rs).
+profile: admin
+
+manage:
+  # The namespaces the manage profile may change and install apps into.
+  # Required for manage; each must exist (a RoleBinding cannot be created
+  # in a namespace that does not), or set createNamespaces.
+  namespaces: []
+  createNamespaces: false
+
+# Set any of these to override the profile, key by key. Every key and its
+# meaning (the profile decides the defaults):
+#
+#   explorer:
+#     read: true          reading built-in kinds and custom resources as
+#                         the agent (rbac.customResources): Explorer, scan,
+#                         Storage card
+#     write: true         creating, changing, deleting them: Explorer edits,
+#                         GitOps, remediations
+#     secrets: true       Secrets, which read does not include
+#     namespaces: []      where write applies; empty is any. Whatever it
+#                         says, the agent never writes in kube-system or its
+#                         own namespace as itself, never RBAC, admission,
+#                         CRDs or CSRs, and never forwards proxy, exec,
+#                         attach or port-forward as itself.
+#   logs: true            pod logs
+#   exec: true            a shell in a pod, for organization admins; never
+#                         in kube-system or the agent's own namespace, and
+#                         only in explorer.namespaces when that is set
+#   shell: true           the cluster terminal: a short-lived pod in
+#                         w8s-shell with kubectl and wctl signed in as the
+#                         person (needs kubectl.enabled; see `shell` below)
+#   kubectl:
+#     enabled: true       kubectl through w8s as the person, under your RBAC
+#     allowedGroups: [w8s:users, w8s:org-admins, w8s:developers]
+#                         the only groups a forwarded request may carry
+#   apps:
+#     enabled: true       apps from the hub, installed with Helm
+#     namespaces: []      where apps may go; empty is any
+#     chartSources: []    URL prefixes charts may come from; empty is any
+#                         https/oci/repo reference
+#   ci: true              CI builds in w8s-ci
+#   tunnels:
+#     mode: internalRoutesOnly   `wctl tunnel` to internal routes' backends
+#                                and exported Services; "off" for none
+#   selfUpgrade:
+#     mode: "off"         "off": upgrade with `helm upgrade` yourself.
+#                         approve: the hub's Upgrade creates the Job
+#                         suspended for a cluster admin to resume. auto: it
+#                         runs at once. approve and auto create a
+#                         ServiceAccount bound to cluster-admin that only
+#                         that Job uses. Quote "off": bare off is false.
+#
+# e.g. `--set profile=observe --set capabilities.logs=false`
+capabilities: {}
+
+# Pod and container security settings for the agent, the spoke relay and
+# the OpenTelemetry collectors. Every image the chart runs is non-root and
+# writes nothing to its root filesystem (the agent's Helm gets an emptyDir
+# at /tmp). Override only for an image of your own that needs otherwise.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: ["ALL"]
+
+# Opt-in NetworkPolicies for the agent and the spoke relay
+# (templates/networkpolicy.yaml). They only apply on a CNI that enforces
+# NetworkPolicy. What they allow:
+#   agent: DNS; TCP 443/6443 anywhere but the cloud metadata address (the
+#          API server, and the chart repositories app installs pull
+#          from); any pod in the cluster (tunnels, the relay, the
+#          registry); in: its DNS port only.
+#   relay: DNS; UDP anywhere (the hub and peer relays, NAT punch-through
+#          uses arbitrary ports); TCP 443/6443 (API server); any pod in
+#          the cluster (exported Services); in: UDP 8443 only.
+# What that stops: the agent reaching kubelets (10250), node ports, the
+# metadata service, or the internet on anything but 443.
+networkPolicy:
+  enabled: false
+  # Extra egress rules for the agent, as NetworkPolicy egress entries.
+  agentExtraEgress: []
+  # Extra egress rules for the relay.
+  relayExtraEgress: []
+
+# Pull secrets for image.repository and relay.image.repository. Empty for
+# a customer cluster (the public image needs none); the hub's own dogfood
+# agent pulls from registry.w8s.cloud with the registry credential
+# (ops/deploy-hub). The Secret must already exist in the release namespace.
+imagePullSecrets: []
+
+cloudflared:
+  namespace: w8s-system
+  secretName: cloudflared-token
+  # Empty means "derive from this release" - {{ .Release.Name }}-cloudflared,
+  # see w8s-agent.cloudflaredDeploymentName/tunnelResourceName in
+  # templates/_helpers.tpl. Every agent install lands in the same fixed
+  # cloudflared.namespace by default, so a bare literal here (the old
+  # default: both "cloudflared") made any two installs on the same physical
+  # cluster collide on the exact same Deployment/CloudflareTunnel CR name
+  # regardless of cluster_id (W3T-56 - confirmed live: the persistent e2e
+  # cluster's tunnel identity/ingress list was shared across every run
+  # because of this). Set explicitly only if you want a fixed name across
+  # releases, e.g. to intentionally adopt/share an existing object.
+  deploymentName: ""
+  tunnelResourceName: ""
+
+# Envoy Gateway is installed as a chart dependency (see Chart.yaml) so every
+# w8s-managed cluster runs the identical Gateway API controller, regardless
+# of what ingress the cluster already has. Run `helm dependency build`
+# before installing/packaging this chart. Set to false only if the cluster
+# should reuse a Gateway API controller you've already installed yourself -
+# in that case also set gateway.className to that controller's GatewayClass.
+envoy-gateway:
+  enabled: true
+  crds:
+    # Envoy Gateway's chart bundles the Gateway API CRDs from the upstream
+    # "experimental" release channel (it needs a few experimental types
+    # itself) - but that bundle labels *every* CRD in it
+    # gateway.networking.k8s.io/channel: experimental, including the core
+    # ones (Gateway, HTTPRoute, GatewayClass, ...) that are also available
+    # standalone in the "standard" channel. GKE clusters that manage
+    # Gateway API themselves ship a built-in ValidatingAdmissionPolicy
+    # (`enforce-gateway-standard-channel`) that flatly rejects any
+    # experimental-channel CRD, which fails this entire install - confirmed
+    # live on a GKE Autopilot cluster. w8s only ever uses the core/standard
+    # types (Gateway, HTTPRoute, GatewayClass), so on a cluster that already
+    # manages standard-channel Gateway API CRDs itself (GKE being the common
+    # case), set this to false and let the cluster's own CRDs be used
+    # instead of trying to install a conflicting copy.
+    #
+    # BUT: this one switch also drops Envoy Gateway's *own* CRDs
+    # (gateway.envoyproxy.io - EnvoyProxy, ClientTrafficPolicy, ...), which
+    # the provider does not supply, and without them the install fails at
+    # templates/clienttrafficpolicy.yaml ("no matches for kind
+    # ClientTrafficPolicy ... ensure CRDs are installed first" - confirmed
+    # live on GKE) and the Envoy Gateway controller has nothing to
+    # reconcile. So whenever this is false, also set
+    # envoy-gateway-crds.enabled=true below, which installs only Envoy
+    # Gateway's own CRDs. The GKE recipe is therefore:
+    #
+    #   --set envoy-gateway.crds.enabled=false \
+    #   --set envoy-gateway-crds.enabled=true
+    #
+    # Run that upgrade TWICE on a cluster that has no Envoy Gateway CRDs
+    # yet: those CRDs land as ordinary templated resources, and Helm
+    # validates the whole manifest against the API server before applying
+    # any of it, so templates/clienttrafficpolicy.yaml is skipped (it
+    # checks .Capabilities for the CRD) until the run after the one that
+    # created the CRD. Nothing else waits on it.
+    enabled: true
+  # Keep small for a per-customer-cluster control plane; Envoy Gateway's
+  # own defaults target a shared, high-traffic install.
+  deployment:
+    envoyGateway:
+      resources:
+        limits:
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+  # Left unset by the upstream chart, which means Autopilot clusters inject
+  # their own default floor (500m CPU / 2Gi memory) for this one-shot cert
+  # generation Job - confirmed live, and far more than it needs.
+  certgen:
+    job:
+      resources:
+        limits:
+          memory: 128Mi
+        requests:
+          cpu: 25m
+          memory: 64Mi
+
+# Envoy Gateway's CRDs-only chart (second dependency in Chart.yaml). Only
+# for clusters where the provider owns the Gateway API CRDs (GKE): enable
+# this together with envoy-gateway.crds.enabled=false so Envoy Gateway's
+# own CRDs still get installed while the provider's Gateway API CRDs are
+# left alone. Do not enable it while envoy-gateway.crds.enabled is true -
+# both would then try to create the same gateway.envoyproxy.io CRDs. The
+# two nested keys are the upstream chart's own; crds.gatewayAPI stays off
+# because installing Gateway API CRDs here would recreate exactly the
+# conflict envoy-gateway.crds.enabled=false avoids.
+envoy-gateway-crds:
+  enabled: false
+  crds:
+    gatewayAPI:
+      enabled: false
+    envoyGateway:
+      enabled: true
+
+envoyProxy:
+  # The Service type of the Gateway's Envoy proxy. ClusterIP, because
+  # nothing outside the cluster ever needs to reach it: every hostname
+  # w8s publishes arrives through cloudflared, which connects to the
+  # Gateway from inside the cluster. Envoy Gateway's own default is a
+  # LoadBalancer per Gateway, which on a managed cluster buys a cloud load
+  # balancer that never sees a packet, and on a single-node box fights
+  # whatever already holds port 80 (confirmed live: a second LoadBalancer
+  # Service on the same node stays pending). Set to "LoadBalancer" only
+  # for a cluster that reaches the Gateway directly, without cloudflared.
+  # Empty leaves Envoy Gateway's default in place.
+  serviceType: ClusterIP
+  # Strips the `Server: envoy` header Envoy stamps on every response,
+  # including its own default 404 for an unmatched Host/path (see W3T-21 and
+  # templates/clienttrafficpolicy.yaml) - on by default so a scanner hitting
+  # an undefined path can't fingerprint "this is an Envoy-fronted cluster"
+  # from the response headers alone. Set to false only if you need the
+  # header for some reason (e.g. debugging against upstream Envoy docs).
+  suppressServerHeader: true
+  # Requests and limits for the Envoy proxy container. Empty keeps Envoy
+  # Gateway's own default, a request of 100m CPU and 512Mi memory: sized
+  # for a shared, busy gateway, and the largest single request this chart
+  # makes. An idle proxy uses a small fraction of that. On a small node
+  # (a Raspberry Pi) set something like
+  #   requests: {cpu: 25m, memory: 64Mi}
+  #   limits: {memory: 256Mi}
+  resources: {}
+
+gateway:
+  namespace: w8s-system
+  # Empty means "derive from this release" - {{ .Release.Name }}-gateway,
+  # see w8s-agent.gatewayName in templates/_helpers.tpl. Same reasoning as
+  # cloudflared.deploymentName/tunnelResourceName above (W3T-56): the old
+  # fixed "w8s-gateway" default collided across any two installs sharing a
+  # physical cluster's gateway.namespace. Set explicitly only if you want a
+  # fixed name across releases.
+  name: ""
+  className: w8s-envoy
+  # Gateway API's own status.addresses field (populated by whichever
+  # controller is running) is what the relay uses to find the in-cluster
+  # target for published-service traffic - see gateway_address() in
+  # agent/src/cloudflared.rs. This only needs overriding for a Gateway API
+  # implementation whose listener port doesn't match its externally
+  # reachable port (encountered with Traefik's default install; Envoy
+  # Gateway does not have this quirk).
+  listenerPort: 80
+
+# The cluster's OpenTelemetry Collector (W3T-191, templates/otel-collector.yaml).
+# On by default: with nothing else configured it reports a small set of
+# Kubernetes health metrics (node conditions and allocatable resources,
+# Deployment/DaemonSet/StatefulSet counts, pod phases, container restarts)
+# to the hub, which shows them on the cluster page. Workloads that already
+# emit OpenTelemetry send to it over OTLP at
+# http://<release>-otel.<namespace>:4317 (gRPC) or :4318 (HTTP) and the hub
+# receives their metrics, logs and traces as this cluster's - there is no
+# w8s SDK. It exports to the agent, which forwards to the hub over the
+# control bus as this cluster; it holds no credential of its own. Set
+# enabled=false to run no collector at all.
+# w8s's own telemetry of the agent and the spoke relay - not the cluster's
+# readings above or below, which the Telemetry page shows. For w8s's own
+# clusters only (ops/deploy-hub sets it for the hub's dogfood cluster):
+# an OTLP/HTTP endpoint, and both export their traces, metrics and logs
+# there and continue the traces the hub sends with its requests. Empty,
+# the default and what every customer install keeps, exports nothing, and
+# no OTEL_* variable changes that (crates/w8s-telemetry, init_opt_in).
+# `resourceAttributes` are added to both resources next to
+# service.instance.id (the pod): a Leapfrog org's own hub (the hub's
+# org_stack.rs) sets service.namespace to its namespace, so Grafana tells
+# its agent and relay from the hub cluster's own.
+ownTelemetry:
+  endpoint: ""
+  resourceAttributes: {}
+
+observability:
+  enabled: true
+  # The contrib distribution (k8s_cluster and kubeletstats are not in the
+  # core one), pinned. Bump deliberately. Both collectors export to the
+  # agent, which forwards to the hub over the control bus: there is no
+  # hub endpoint or credential to set.
+  image: otel/opentelemetry-collector-contrib:0.161.0
+  kubernetes:
+    # The k8s_cluster receiver (read-only ClusterRole of its own). false
+    # leaves only what workloads push over OTLP.
+    enabled: true
+    interval: 30s
+  # Per-node network/storage metrics (templates/otel-collector-node.yaml): a
+  # DaemonSet, not part of the Deployment above, because the kubeletstats
+  # receiver only ever sees the node it runs on. Its own switch, independent
+  # of kubernetes.enabled above - one is an API-server watch, the other a
+  # kubelet scrape, different blast radius and different RBAC.
+  nodeMetrics:
+    enabled: true
+    interval: 30s
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  # Spans (the traces pipeline in templates/otel-collector.yaml): what
+  # your apps' SDKs and the eBPF instrumentation below send, sampled here
+  # before anything leaves the cluster, and kept by the hub as a short tail
+  # of what failed and what was slow. enabled: false removes the pipeline,
+  # so a span sent to the collector is refused at the door and nothing
+  # goes up; the metrics and logs pipelines are untouched.
+  traces:
+    enabled: true
+    # Of every hundred traces, how many go up. Decided by trace id, so a
+    # trace keeps all its spans or none. 100 sends everything.
+    samplePercent: 10
+  # Zero-code instrumentation of your services (templates/
+  # otel-collector-ebpf.yaml): OpenTelemetry's eBPF instrumentation as a
+  # DaemonSet, reading HTTP, gRPC and database traffic at the kernel and
+  # reporting request rate, errors and latency per service with no change
+  # to any container. Off by default: it runs privileged in the host's PID
+  # namespace, and needs a kernel of 5.8 or later with BTF (every current
+  # distribution kernel; not every hardened or managed node pool allows
+  # privileged pods). Only the namespaces listed are instrumented, less
+  # the excluded ones.
+  ebpf:
+    enabled: false
+    # Pinned, like the collector. Its config file is OBI's v1 format: bump
+    # the image and the template together.
+    image: ghcr.io/open-telemetry/opentelemetry-ebpf-instrumentation/ebpf-instrument:v0.14.0
+    # Required when enabled. A glob per entry: ["shop", "api-*"], or ["*"]
+    # for every namespace but the excluded ones.
+    namespaces: []
+    # Never instrumented, whatever `namespaces` says: Kubernetes' own, the
+    # chart's (the agent, the relay, the collectors, the gateway) and the
+    # CI one. OBI's and the collectors' own binaries are excluded
+    # on top of this, and OBI's own system-namespace defaults stay. Take
+    # w8s-system out of the list to watch the platform itself.
+    excludeNamespaces: ["kube-*", "w8s-system", "w8s-ci"]
+    # How often the RED metrics go to the collector.
+    interval: 30s
+    # Spans too, not only metrics: what the hub's service map and span
+    # tail are drawn from. They go through the collector's traces
+    # pipeline above, so traces.enabled and samplePercent apply to them.
+    traces: true
+    # Nodes to run on, e.g. only those with a kernel that qualifies.
+    nodeSelector: {}
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# The relay (W3T-198, templates/relay.yaml, docs/direct-connectivity.md):
+# the transport sidecar next to the agent, the same in every cluster, the
+# hub's own included. It talks only to this cluster's NATS leaf, as this
+# cluster, and carries traffic to the organisation's other clusters
+# directly or through the hub. A plain pod: no host networking.
+relay:
+  image:
+    # Same registry and reasoning as image.repository above.
+    repository: oci.w8s.cloud/w8s/w8s-relay
+    # Same as image.tag above: the chart's own version.
+    tag: "0.46.4"
+    # Same as image.digest and image.pullPolicy above.
+    digest: "" # pin: relay.image
+    pullPolicy: ""
+  # Where the hub is comes with the cluster's join token and login; no
+  # hub address is set here. certificates.caBundle adds trust anchors for
+  # our iroh relay's certificate.
+  rustLog: info
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Names the relay resolves itself, as pod hostAliases ([{ip, hostnames}]):
+  # a relay in the hub cluster (a Leapfrog org's) reaching relay.w8s.cloud
+  # by the serving relay's Service IP, as a CNI may not loop back to a
+  # Service's external IP from inside the cluster.
+  hostAliases: []
+  # Serving other clusters (crates/w8s-relay/src/serve.rs): on in the
+  # hub's own cluster only, whose hub this relay then is. It runs our iroh
+  # relay and the endpoint every cluster's leaf link ends at, and lets in
+  # whom the hub's controller says, asked on this cluster's NATS leaf.
+  # The hub learns where it is from it (w8s-http controlBus.hubCluster
+  # names this cluster).
+  serve:
+    enabled: false
+    # Our iroh relay's public URL: what every cluster's login names.
+    relayUrl: https://relay.w8s.cloud
+    # The hub NATS's leafnode port, where clusters' leaf links end.
+    leafAddr: ""
+    # The hub operator's public key (`O...`, the `sub` of the operator JWT
+    # in the hub's NATS auth Secret). With it this relay checks a
+    # cluster's JWT itself, from the operator's word for its account that
+    # the JWT carries, instead of asking the hub on the cluster's NATS
+    # leaf. Empty: every JWT is asked about.
+    operatorPublicKey: ""
+    # The hub endpoint's key: a Secret holding `key`, 64 hex digits.
+    # Clusters pin the EndpointId it gives, so it must never change.
+    # Empty: this chart mints <release>-relay-iroh once and keeps it.
+    keySecret: ""
+    # Our iroh relay's certificate: a kubernetes.io/tls Secret (tls.crt,
+    # tls.key), e.g. what cert-manager issues for relayUrl's host. With
+    # it, this relay runs our iroh relay and a hub endpoint of its own on
+    # the Service below (the hub cluster). Empty: no relay server, no
+    # Service, no open port; this cluster's endpoint is the hub, homed on
+    # the relay its login names, and clusters reach it through that one
+    # (a Leapfrog org's relay). relayUrl, keySecret and service are then
+    # unused.
+    tlsSecret: ""
+    # How it is reached from outside: its own Service.
+    service:
+      type: LoadBalancer
+      # An address a node itself holds (a floating IP), as on w8s's own
+      # hub (docs/hub-cluster-fcos.md): a ClusterIP Service with it here.
+      externalIPs: []
+      # Local: the source address survives to the relay, whose QUIC
+      # address discovery tells each cluster its own public address.
+      externalTrafficPolicy: Local
+      annotations: {}
+      httpsPort: 443
+    nodeSelector: {}
+
+# Cross-cluster Services (W3T-199, docs/direct-connectivity.md §4): apply a
+# ServiceExport (multicluster.x-k8s.io/v1alpha1) next to a Service and the
+# organisation's other clusters get it as a ServiceImport, reached through
+# the relays. The CRDs come with this chart; turn that off if the cluster
+# already runs an MCS implementation that owns them.
+serviceExports:
+  installCrds: true
+
+# Upgrading this release from the hub (W3T-192): the cluster page shows the
+# chart version this agent runs and the latest published one, and with
+# this enabled an "Upgrade" there makes the agent run `helm upgrade <this
+# release> w8s/w8s-agent --version <latest> --reset-then-reuse-values` as
+# a Job, so every --set you gave at install time is kept.
+#
+# Whether it may is capabilities.selfUpgrade.mode above (off by default
+# since 0.16.0). `enabled: true` is the older spelling and still means
+# mode auto.
+selfUpgrade:
+  enabled: false
+  # oci:// since chart 0.23.0 (docs/public-registry.md): no `helm repo
+  # add`, chart_upgrade.rs addresses charts/w8s-agent in this registry
+  # directly. An install still on the classic
+  # `https://charts.w8s.cloud` keeps working - chart_upgrade.rs handles
+  # both forms - until its own next upgrade picks this up.
+  chartRepository: oci://oci.w8s.cloud/charts
+
+# A ValidatingAdmissionPolicy keyed to the agent's ServiceAccount
+# (templates/admission-policy.yaml): the API server refuses the agent's
+# writes to RBAC (beyond the access policy's own `w8s-access-*` bindings
+# to the chart's three roles for people, when kubectl through w8s is
+# on), admission, CRDs and certificate requests, its writes in
+# kube-system beyond the cluster DNS ConfigMaps, and any privileged or
+# host-namespace pod it creates - whatever its RBAC or binary would allow.
+# Opt-in; needs Kubernetes 1.30+.
+admissionPolicy:
+  enabled: false
+
+# Roles for the people who use kubectl through w8s (templates/
+# access-roles.yaml, reference/cluster-access.md). The agent impersonates
+# each person as `w8s:users` plus their organization role's group,
+# `w8s:org-admins` or `w8s:developers`; the chart ships three
+# ClusterRoles for people - `<release>-w8s-agent-view`, `-edit` (both
+# Kubernetes' own, aggregated) and `-admin` (cluster-admin) - whenever
+# kubectl through w8s is on. Who gets which:
+#   - groupBindings.enabled (on by default) binds them here: every
+#     organization member may read, developers may edit (in
+#     manage.namespaces when those are set, else everywhere),
+#     organization admins may do anything, all as themselves in the audit
+#     log. These are the defaults the hub's Access page shows.
+#   - The organization's access policy, set on the hub's Access page,
+#     which the agent applies as bindings of its own (`w8s-access-*`) to
+#     these roles only: a role per group, and a role per named person.
+#     RBAC is additive, so it adds to the bindings above and cannot
+#     lower them.
+# To let the policy (or bindings of your own) alone decide - say, a
+# production cluster where developers only read - set
+# groupBindings.enabled=false.
+access:
+  groupBindings:
+    enabled: true
+
+# Who a person acts as in this cluster when they use it through w8s
+# (Explorer, logs, pod shell, kubectl; W3T-200, docs/identity-separation.md,
+# crates/w8s-agent/src/user_token.rs). Every request made for a person
+# carries that person's access token; the agent verifies it against the
+# hub's issuer (signature, expiry, issuer, audience, organization) and
+# derives the user and groups itself, so the hub cannot name anyone the
+# token does not. A request for a person without a verifiable token is
+# refused, never run as the agent (this was kubeProxy.requireUserToken,
+# now always on and no longer a setting). Requests the hub makes with no
+# person behind it (registry, CI, publications) run as this agent's
+# ServiceAccount.
+kubeProxy:
+  # impersonate: the agent sets Impersonate-User/-Group from the verified
+  #   token. No cluster change; uses the `impersonate` grant in rbac.yaml.
+  # passthrough: the agent sends the token itself as the bearer. The API
+  #   server must trust oidc.issuer (AuthenticationConfiguration on
+  #   Kubernetes >= 1.30, or the --oidc-* flags; EKS external OIDC; GKE
+  #   Identity Service; not AKS), with the same audience and claim mapping
+  #   as below, so both modes name the same subject.
+  identity: impersonate
+  oidc:
+    # The hub's Keycloak realm. Empty: the agent cannot verify anyone, and
+    # refuses every request made for a person.
+    issuer: https://www.w8s.cloud/auth/realms/w8s
+    # Empty: <issuer>/protocol/openid-connect/certs.
+    jwksUrl: ""
+    # The audience every token must carry. w8s-relay is what the hub's
+    # Keycloak puts on every wctl and w8s-cloud user token (an audience
+    # mapper the hub keeps in place, crates/w8s-http/src/keycloak_sync.rs),
+    # so a token Keycloak issued for anything else - a cluster's own
+    # client-credentials token, say - is refused here. Empty skips the
+    # check.
+    audience: w8s-relay
+    # The organization this cluster belongs to is never a value here: it
+    # is the agent's own login (the hub's word), before its join token.
+    # A token is for it when its organizationClaim names it or its groups
+    # (orgGroupsRoot below) make the holder a member. An `organization`
+    # left in an older install's values is ignored since 0.45.1.
+    organizationClaim: org_id
+    # kube-apiserver's --oidc-username-claim / --oidc-username-prefix /
+    # --oidc-groups-claim / --oidc-groups-prefix, with the same meaning,
+    # except that an empty usernamePrefix is "w8s:", never <issuer>#.
+    # A person is w8s:<email> (w8s:dan@acme.com), so a w8s person can never
+    # be mistaken for one of this cluster's own users; bind a role to that
+    # name to grant one person (the Access page's grants do). "-" is no
+    # prefix at all: only for pass-through against an API server mapped
+    # that way, since a w8s person then shares names with your own users.
+    usernameClaim: email
+    usernamePrefix: "w8s:"
+    # Empty: "groups" when orgGroupsRoot is set, else no groups.
+    groupsClaim: ""
+    # Must stay empty with orgGroupsRoot.
+    groupsPrefix: ""
+    # Where the hub keeps each organization's Keycloak groups
+    # (<root>/<org_id>/org-admins, <root>/<org_id>/developers). Only this
+    # cluster's organization's groups count, as w8s:users plus
+    # w8s:org-admins or w8s:developers - the groups the relay has always
+    # asserted; every other group in the token is dropped. "" reads the
+    # groups claim with the plain --oidc-groups-* rules instead.
+    #
+    # In passthrough mode the API server needs the same translation, as an
+    # AuthenticationConfiguration jwt authenticator (Kubernetes >= 1.30):
+    #   claimMappings:
+    #     username: {claim: email, prefix: "w8s:"}
+    #     groups:
+    #       expression: >-
+    #         has(claims.groups) && ('/w8s-orgs/<org>/org-admins' in claims.groups
+    #         || '/w8s-orgs/<org>/developers' in claims.groups) ? ['w8s:users']
+    #         + ('/w8s-orgs/<org>/org-admins' in claims.groups ? ['w8s:org-admins'] : [])
+    #         + ('/w8s-orgs/<org>/developers' in claims.groups ? ['w8s:developers'] : [])
+    #         : []
+    # (w8s_oidc::OrgGroups::cel_expression renders it.)
+    orgGroupsRoot: /w8s-orgs
+
+# The w8s control bus in this cluster (templates/nats-leaf.yaml, ADR-017):
+# a NATS leaf server next to the agent, linked to the hub's NATS, which
+# everything the agent tells the hub goes over. hubUrl empty: the link
+# goes through this cluster's relay; set it to dial the hub another way.
+controlBus:
+  image:
+    repository: nats
+    tag: 2.15.0-alpine
+  # The leaf's JetStream domain, apart from the hub's (`hub`).
+  domain: cluster
+  storage: 1Gi
+  storageClassName: ""
+  hubUrl: ""
+  # The token the leaf asks of the agent and the relay. Empty: generated
+  # on install and kept (lookup). Set it where nothing can look up, e.g.
+  # a GitOps render, or every render mints a new one.
+  token: ""
+  # The largest message, as on the hub: a kube API response this cluster
+  # sends the hub travels as one (64MB is NATS's ceiling).
+  maxPayload: 64MB
+
+# The cluster scan (crates/w8s-agent/src/scan_job.rs). The agent runs it as
+# a Job of this image in its own namespace, as a read-only ServiceAccount
+# the chart creates (templates/rbac.yaml), when the hub asks for a scan and
+# once after it connects. Needs capabilities.explorer.read.
+scanner:
+  image:
+    # crates/w8s-clusterscan, published with every release as the chart's
+    # own version and pinned by digest when the chart is packaged, like
+    # image and relay.image.
+    repository: oci.w8s.cloud/w8s/w8s-clusterscan
+    tag: "0.46.4"
+    digest: "" # pin: scanner.image
+    pullPolicy: ""
+
+# The cluster terminal (capabilities.shell, crates/w8s-agent/src/
+# cluster_shell.rs). Each open terminal is one pod in the w8s-shell
+# namespace, running this image, with no Kubernetes credential of its own:
+# its kubectl goes through `wctl proxy` and the w8s relay back into this
+# agent's kube proxy as the person, under your RBAC. The pod is deleted
+# when the terminal closes or the person's w8s session ends.
+shell:
+  image:
+    # k8s/wctl-shell: wctl plus a pinned kubectl, published with every
+    # release as the chart's own version and pinned by digest when the
+    # chart is packaged, like image and relay.image.
+    repository: oci.w8s.cloud/w8s/wctl-shell
+    tag: "0.46.4"
+    digest: "" # pin: shell.image
+    pullPolicy: ""
+  # The hub API wctl in the terminal talks to; it reaches this cluster
+  # over iroh as an edge.
+  apiUrl: https://www.w8s.cloud/api
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

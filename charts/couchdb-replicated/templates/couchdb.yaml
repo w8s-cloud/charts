@@ -1,0 +1,149 @@
+{{- $name := include "cr.name" . }}
+{{- $secret := include "cr.secretName" . }}
+{{- $peers := list }}
+{{- range .Values.peers }}
+{{- $peers = append $peers (printf "%s=%s" . (include "cr.peerHost" (dict "root" $ "peer" .))) }}
+{{- end }}
+# The exported Service: what every other site pulls from, through the
+# Service w8s imports for it there.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.couchdb.serviceName }}
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: couchdb
+  ports:
+    - name: http
+      port: 5984
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}-couchdb
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: couchdb
+spec:
+  # One node per site. The sites are the replicas; CouchDB's own
+  # clustering would need its nodes to reach each other's addresses,
+  # which w8s deliberately does not give across clusters.
+  replicas: 1
+  serviceName: {{ .Values.couchdb.serviceName }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: couchdb
+  template:
+    metadata:
+      labels:
+        {{- include "cr.labels" . | nindent 8 }}
+        app.kubernetes.io/component: couchdb
+      annotations:
+        checksum/files: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/auth: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        fsGroup: 5984
+      initContainers:
+        # The image's entrypoint chowns everything under /opt/couchdb and
+        # stops on the first failure, so a read-only ConfigMap mount there
+        # kills it. Copy the settings into a writable local.d instead.
+        - name: settings
+          image: {{ .Values.couchdb.image }}
+          imagePullPolicy: {{ .Values.couchdb.pullPolicy }}
+          command: ["cp", "/etc/w8s/10-w8s.ini", "/opt/couchdb/etc/local.d/10-w8s.ini"]
+          volumeMounts:
+            - {name: files, mountPath: /etc/w8s/10-w8s.ini, subPath: 10-w8s.ini}
+            - {name: settings, mountPath: /opt/couchdb/etc/local.d}
+      containers:
+        - name: couchdb
+          image: {{ .Values.couchdb.image }}
+          imagePullPolicy: {{ .Values.couchdb.pullPolicy }}
+          env:
+            - name: COUCHDB_USER
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: username}}
+            - name: COUCHDB_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: password}}
+          ports:
+            - name: http
+              containerPort: 5984
+          readinessProbe:
+            httpGet: {path: /_up, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_up, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.couchdb.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /opt/couchdb/data
+            - name: settings
+              mountPath: /opt/couchdb/etc/local.d
+        # Keeps _replicator pulling from exactly the configured peers
+        # (files/wire-replication.sh).
+        - name: replication
+          image: {{ .Values.couchdb.image }}
+          imagePullPolicy: {{ .Values.couchdb.pullPolicy }}
+          command: ["sh", "/etc/w8s/wire-replication.sh"]
+          securityContext:
+            runAsUser: 5984
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: COUCHDB_USER
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: username}}
+            - name: COUCHDB_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: password}}
+            - {name: CLUSTER_ID, value: {{ .Values.clusterId | quote }}}
+            - {name: DATABASE, value: {{ .Values.database | quote }}}
+            - {name: PEERS, value: {{ join " " $peers | quote }}}
+            - {name: CONTINUOUS, value: {{ .Values.replication.continuous | toString | quote }}}
+            - {name: CHECKPOINT_INTERVAL_MS, value: {{ .Values.replication.checkpointIntervalMs | int | toString | quote }}}
+            - {name: WORKER_PROCESSES, value: {{ .Values.replication.workerProcesses | int | toString | quote }}}
+            - {name: WORKER_BATCH_SIZE, value: {{ .Values.replication.workerBatchSize | int | toString | quote }}}
+            - {name: CONNECTION_TIMEOUT_MS, value: {{ .Values.replication.connectionTimeoutMs | int | toString | quote }}}
+            - {name: RECONCILE_SECONDS, value: {{ .Values.replication.reconcileSeconds | int | toString | quote }}}
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - name: files
+              mountPath: /etc/w8s/wire-replication.sh
+              subPath: wire-replication.sh
+      volumes:
+        - name: settings
+          emptyDir: {}
+        - name: files
+          configMap:
+            name: {{ $name }}-files
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.couchdb.storage.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.couchdb.storage.size }}
+{{- if .Values.serviceExport.enabled }}
+---
+# Makes this site's CouchDB reachable from the organisation's other
+# clusters (Multi-Cluster Services API; the w8s agent chart installs the
+# CRD). The agent reports it; every other cluster gets a Service named
+# {{ .Values.couchdb.serviceName }}--{{ .Release.Namespace }}--{{ .Values.clusterId }} pointing at its relay.
+apiVersion: multicluster.x-k8s.io/v1alpha1
+kind: ServiceExport
+metadata:
+  name: {{ .Values.couchdb.serviceName }}
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+{{- end }}

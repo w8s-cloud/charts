@@ -1,0 +1,10 @@
+apiVersion: v2
+name: couchdb-replicated
+description: >-
+  Reference deployment: one CouchDB per cluster, each taking writes, each
+  pulling the others' changes slowly and incrementally over w8s exported
+  Services, replicated over the secure cluster connections,
+  with a small guestbook app published active/active behind one hostname.
+type: application
+version: 0.1.0
+appVersion: "3.4.2"

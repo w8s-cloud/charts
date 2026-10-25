@@ -1,0 +1,11 @@
+apiVersion: v2
+name: private-inference
+description: >-
+  Reference deployment: a GPU you own (a box at home, in the office, or any
+  cluster with a GPU) runs Ollama and exports it through a keyed gateway;
+  apps in your other clusters reach it by name over w8s, with an
+  OpenAI-compatible API and a small chat page. Nothing is exposed publicly
+  unless you give the chat page a hostname.
+type: application
+version: 0.1.0
+appVersion: "0.34.4"

@@ -1,0 +1,290 @@
+{{- /*
+The relay (W3T-198, docs/direct-connectivity.md §2 and §6,
+docs/iroh-transport.md): the transport sidecar next to the agent, the
+same in every cluster. It carries the cluster's NATS leaf to the hub and
+people's and other clusters' streams over iroh, with the cluster's NATS
+login (the join token until the agent has the login), which the agent
+keeps in the control bus Secret mounted below and which names the hub and
+our relay. The agent opens no connection to it; they share the cluster's
+NATS leaf. A plain pod: no host networking, no host ports (NAT
+punch-through rides the outbound mapping).
+
+With relay.serve.enabled (the hub's own cluster) it also serves the
+others: our iroh relay and the hub endpoint, on a Service of its own.
+*/ -}}
+{{- $name := include "w8s-agent.relayName" . }}
+{{- $serve := .Values.relay.serve | default dict }}
+{{- $serving := $serve.enabled }}
+{{- /* With a certificate: our iroh relay and a hub endpoint of its own, on
+       a Service of their own (the hub cluster). Without: homed on the
+       relay the cluster's login names, no Service and no open port (a
+       Leapfrog org's relay). */}}
+{{- $ownRelay := and (eq $serving true) (not (empty $serve.tlsSecret)) }}
+{{- $svc := $serve.service | default dict }}
+{{- $keySecret := $serve.keySecret | default (printf "%s-iroh" $name) }}
+{{- if $ownRelay }}
+{{- if not $serve.keySecret }}
+{{- /* The hub endpoint's key, minted once and kept (lookup): clusters
+       pin the EndpointId it gives. */}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $keySecret }}
+{{- $key := "" }}
+{{- if and $existing $existing.data }}{{ $key = index $existing.data "key" | default "" | b64dec }}{{ end }}
+{{- if not $key }}{{ $key = randAlphaNum 64 | sha256sum }}{{ end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $keySecret }}
+  annotations:
+    # Generated once and kept: an uninstall or a values change that drops
+    # this must not delete it (it cannot be minted back).
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  key: {{ $key | quote }}
+---
+{{- end }}
+# How other clusters reach this relay: our iroh relay over HTTPS (TCP,
+# how a cluster whose network drops UDP still gets here), its QUIC
+# address discovery, and the hub endpoint.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-serve
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- with $svc.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type | default "LoadBalancer" }}
+  {{- with $svc.externalIPs }}
+  externalIPs: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if eq ($svc.type | default "LoadBalancer") "LoadBalancer" }}
+  # Local, not Cluster: a load balancer otherwise masquerades inbound UDP,
+  # and QUIC address discovery would tell every cluster the node's own
+  # address. One relay pod, so "only nodes with a pod" costs nothing.
+  externalTrafficPolicy: {{ $svc.externalTrafficPolicy | default "Local" }}
+  {{- end }}
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: iroh-https
+      port: {{ $svc.httpsPort | default 443 }}
+      targetPort: iroh-https
+      protocol: TCP
+    - name: iroh-qad
+      port: 7842
+      targetPort: iroh-qad
+      protocol: UDP
+    - name: iroh
+      port: 8445
+      targetPort: iroh
+      protocol: UDP
+---
+{{- end }}
+# Its own ServiceAccount, with no API access: the relay reads the cluster's
+# NATS login from a mounted Secret and needs nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    # The NATS leaf's link to the hub (ADR-017): the leaf dials here and
+    # this relay carries it to the hub over iroh (crates/w8s-relay/src/
+    # control_bus.rs).
+    - name: controlbus
+      port: 7422
+      targetPort: controlbus
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  # One relay is the cluster's one iroh endpoint; two with the same key
+  # would fight over it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # The leaf's token, read at start.
+        checksum/nats-token: {{ include "w8s-agent.natsToken" . | sha256sum | trunc 16 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $name }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.relay.hostAliases }}
+      # Names this pod resolves itself (relay.hostAliases): a Leapfrog
+      # org's relay in the hub cluster reaches relay.w8s.cloud through
+      # its Service, the external IP being unreachable from inside.
+      hostAliases: {{- toYaml .Values.relay.hostAliases | nindent 8 }}
+      {{- else if and $ownRelay $svc.externalIPs }}
+      {{- $existingSvc := lookup "v1" "Service" .Release.Namespace (printf "%s-serve" $name) }}
+      {{- if and $existingSvc $existingSvc.spec.clusterIP }}
+      # This cluster's own endpoint reaches our iroh relay at relayUrl,
+      # whose name resolves to the external IP above. From inside the
+      # cluster a CNI may refuse that address (Cilium: no hairpin to a
+      # Service externalIP), so this pod resolves the name to the Service
+      # instead. Its ClusterIP is the existing Service's (lookup): on the
+      # first install there is none yet, and the entry comes with the next
+      # upgrade.
+      hostAliases:
+        - ip: {{ $existingSvc.spec.clusterIP }}
+          hostnames:
+            - {{ (urlParse $serve.relayUrl).hostname }}
+      {{- end }}
+      {{- end }}
+      containers:
+        - name: relay
+          image: {{ include "w8s-agent.imageRef" .Values.relay.image | quote }}
+          imagePullPolicy: {{ include "w8s-agent.imagePullPolicy" .Values.relay.image }}
+          args:
+            # Extra trust anchors for our iroh relay's certificate
+            # (certificates.caBundle), for a hub of your own.
+            - --hub-ca
+            - {{ printf "/hub-ca/%s" .Values.certificates.caKey | quote }}
+          ports:
+            - name: controlbus
+              containerPort: 7422
+              protocol: TCP
+            {{- if $ownRelay }}
+            - name: iroh-https
+              containerPort: 8443
+              protocol: TCP
+            - name: iroh-qad
+              containerPort: 7842
+              protocol: UDP
+            - name: iroh
+              containerPort: 8445
+              protocol: UDP
+            {{- end }}
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.relay.rustLog | quote }}
+            {{- with .Values.ownTelemetry.endpoint }}
+            # The spoke relay's own traces, metrics and logs, for w8s's own
+            # clusters only (values.yaml ownTelemetry; empty on every other).
+            - name: W8S_OWN_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            # The pod is the instance (service.instance.id): several own
+            # clusters' spoke relays are as many series, not one.
+            - name: W8S_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ include "w8s-agent.ownResourceAttributes" $ | quote }}
+            {{- end }}
+            - name: W8S_CONTROL_BUS_LISTEN
+              value: "0.0.0.0:7422"
+            # The cluster's NATS login, as the agent keeps it
+            # (crates/w8s-agent/src/cluster_login.rs): the join token first,
+            # then the login. It says where the hub is.
+            - name: W8S_NATS_CREDS
+              value: /etc/nats-login/user.creds
+            {{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+            {{- if $caps.kubectl.enabled }}
+            # The agent's kube gateway, which edges (wctl) reach over iroh.
+            - name: W8S_KUBE_GATEWAY_ADDR
+              value: {{ printf "%s-kube.%s.svc:8001" (include "w8s-agent.fullname" .) .Release.Namespace | quote }}
+            {{- end }}
+            # The cluster's NATS leaf: the agent, and the hub as this cluster.
+            - name: W8S_NATS_URL
+              value: {{ printf "nats://%s-nats:4222" (include "w8s-agent.fullname" .) | quote }}
+            {{- include "w8s-agent.natsTokenEnv" . | nindent 12 }}
+            {{- if $serving }}
+            - name: W8S_RELAY_SERVE
+              value: "true"
+            - name: W8S_CONTROL_BUS_LEAF_ADDR
+              value: {{ required "relay.serve.leafAddr (the NATS leafnode port its clusters' links end at) is required to serve" $serve.leafAddr | quote }}
+            {{- with $serve.operatorPublicKey }}
+            - name: W8S_OPERATOR_PUBLIC_KEY
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if $ownRelay }}
+            - name: W8S_RELAY_CERT
+              value: /serve-tls/tls.crt
+            - name: W8S_RELAY_KEY
+              value: /serve-tls/tls.key
+            - name: W8S_IROH_KEY_FILE
+              value: /serve-iroh/key
+            - name: W8S_IROH_RELAY_HTTPS
+              value: "0.0.0.0:8443"
+            - name: W8S_IROH_RELAY_QUIC
+              value: "0.0.0.0:7842"
+            - name: W8S_IROH_LISTEN
+              value: "0.0.0.0:8445"
+            - name: W8S_IROH_RELAY_URL
+              value: {{ $serve.relayUrl | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: login
+              mountPath: /etc/nats-login
+              readOnly: true
+            - name: hub-ca
+              mountPath: /hub-ca
+              readOnly: true
+            {{- if $ownRelay }}
+            - name: serve-tls
+              mountPath: /serve-tls
+              readOnly: true
+            - name: serve-iroh
+              mountPath: /serve-iroh
+              readOnly: true
+            {{- end }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.relay.resources | nindent 12 }}
+      volumes:
+        # Optional: the agent writes it (the join token, then the login);
+        # the relay waits for it.
+        - name: login
+          secret:
+            secretName: {{ include "w8s-agent.controlBusSecretName" . }}
+            optional: true
+            items:
+              - { key: user.creds, path: user.creds }
+        - name: hub-ca
+          secret:
+            secretName: {{ include "w8s-agent.caSecretName" . }}
+        {{- if $ownRelay }}
+        - name: serve-tls
+          secret:
+            secretName: {{ $serve.tlsSecret }}
+        - name: serve-iroh
+          secret:
+            secretName: {{ $keySecret }}
+        {{- end }}
+      nodeSelector: {{- toYaml (merge (dict) (($ownRelay | ternary $serve.nodeSelector dict) | default dict) .Values.nodeSelector) | nindent 8 }}
+      tolerations: {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity: {{- toYaml .Values.affinity | nindent 8 }}

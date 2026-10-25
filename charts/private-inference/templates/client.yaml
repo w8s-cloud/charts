@@ -1,0 +1,89 @@
+{{- if include "pi.client" . }}
+{{- $name := include "pi.name" . }}
+{{- $secret := include "pi.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-client
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: client
+  template:
+    metadata:
+      labels:
+        {{- include "pi.labels" . | nindent 8 }}
+        app.kubernetes.io/component: client
+      annotations:
+        checksum/files: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/key: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.client.image }}
+          env:
+            - {name: TEMPLATE, value: client.conf.template}
+            - name: API_KEY
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: apiKey}}
+            - {name: UPSTREAM, value: {{ include "pi.upstream" . | quote }}}
+            - {name: CLUSTER_ID, value: {{ .Values.clusterId | quote }}}
+            - {name: GPU_CLUSTER, value: {{ (eq .Values.role "both") | ternary .Values.clusterId .Values.client.gpuCluster | quote }}}
+            - {name: DEFAULT_MODEL, value: {{ .Values.client.defaultModel | quote }}}
+            - {name: ENDPOINT, value: "http://{{ .Values.client.serviceName }}.{{ .Release.Namespace }}.svc"}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: files, mountPath: /etc/w8s/client.conf.template, subPath: client.conf.template}
+            - {name: files, mountPath: /docker-entrypoint.d/40-render.sh, subPath: 40-render.sh}
+            - {name: files, mountPath: /usr/share/nginx/html/index.html, subPath: index.html}
+      volumes:
+        - name: files
+          configMap:
+            name: {{ $name }}-files
+            defaultMode: 0755
+---
+# What apps in this cluster call: http://{{ .Values.client.serviceName }}.{{ .Release.Namespace }}.svc/v1/...
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.client.serviceName }}
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: client
+  ports:
+    - {name: http, port: 80, targetPort: http}
+{{- if .Values.client.hostname }}
+---
+# Publishes the chat page and the API. Anyone who reaches the hostname can
+# use the model.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-client
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.client.gateway.name }}
+      namespace: {{ .Values.client.gateway.namespace }}
+  hostnames:
+    - {{ .Values.client.hostname | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ .Values.client.serviceName }}
+          port: 80
+{{- end }}
+{{- end }}

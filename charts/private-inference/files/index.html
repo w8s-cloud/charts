@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Private inference</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1b1b1a; --muted:#6b6b66; --line:#e4e3df; --accent:#2f5bd3; --bad:#b3261e; --me:#eef2fd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111110; --card:#1b1b19; --ink:#eceae4; --muted:#9b9a94; --line:#2e2d2a; --accent:#7b9cff; --bad:#f08a80; --me:#1f2640; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:820px; margin:0 auto; padding:24px 16px 40px; display:flex; flex-direction:column; min-height:100vh; gap:14px; }
+  header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; }
+  .route { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--muted); }
+  .route b { color:var(--accent); font-weight:600; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  #log { flex:1; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+  .msg { white-space:pre-wrap; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card); }
+  .msg.me { background:var(--me); align-self:flex-end; max-width:85%; }
+  .meta { font-size:11.5px; color:var(--muted); margin-top:4px; font-family:ui-monospace,monospace; }
+  .empty { color:var(--muted); text-align:center; padding:40px 0; }
+  form { display:flex; gap:8px; align-items:flex-end; }
+  textarea { flex:1; resize:vertical; min-height:44px; max-height:200px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); font:inherit; }
+  select, button { padding:9px 12px; border-radius:8px; font:inherit; }
+  select { border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  button { border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  code { font-family:ui-monospace,monospace; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; display:block; overflow-x:auto; white-space:pre; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12.5px; }
+  .error { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Private inference</h1>
+    <div class="route">served by <b id="cluster">…</b> · model runs on <b id="gpu">…</b></div>
+  </header>
+
+  <div class="row">
+    <label for="model" class="route">model</label>
+    <select id="model"></select>
+    <span class="route" id="models-note"></span>
+  </div>
+
+  <section id="log" class="card" aria-live="polite">
+    <div class="empty" id="empty">Ask something. It runs on your own GPU, reached through w8s: no public endpoint, no cloud GPU.</div>
+  </section>
+
+  <form id="ask">
+    <textarea id="prompt" placeholder="Ask the model…" required></textarea>
+    <button id="send">Send</button>
+  </form>
+  <p class="error" id="error"></p>
+
+  <details class="card">
+    <summary>Use it from your apps</summary>
+    <p class="route">Apps in this cluster call the in-cluster endpoint. It speaks the OpenAI API (<b>/v1</b>) and Ollama's own (<b>/api</b>), and adds the key itself.</p>
+    <code id="snippet"></code>
+  </details>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const history = [];
+let site = {};
+
+function text(el, v) { el.textContent = v; return el; }
+function showError(message) { text($('error'), message || ''); }
+
+function explain(status) {
+  if (status === 401) return 'The GPU cluster refused the key: the apiKey differs between the two clusters.';
+  if (status === 502 || status === 504) return 'The GPU cluster did not answer: is it connected, and has its export been imported here yet?';
+  return `The GPU cluster answered ${status}.`;
+}
+
+async function loadSite() {
+  site = await (await fetch('/w8s/site')).json();
+  text($('cluster'), site.cluster || 'this cluster');
+  text($('gpu'), site.gpu_cluster || 'the GPU cluster');
+  const endpoint = site.endpoint || 'http://inference';
+  text($('snippet'), `curl ${endpoint}/v1/chat/completions \\
+  -H 'Content-Type: application/json' \\
+  -d '{"model": "${site.default_model || 'llama3.2:3b'}",
+       "messages": [{"role": "user", "content": "Hello"}]}'`);
+}
+
+async function loadModels() {
+  const res = await fetch('/api/tags');
+  if (!res.ok) { text($('models-note'), explain(res.status)); return; }
+  const names = ((await res.json()).models || []).map((m) => m.name);
+  const select = $('model');
+  select.replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n, textContent: n })));
+  if (names.includes(site.default_model)) select.value = site.default_model;
+  text($('models-note'), names.length ? '' : 'No models pulled yet: the GPU cluster pulls them on start, which can take a while.');
+}
+
+function bubble(role, content) {
+  $('empty')?.remove();
+  const el = document.createElement('div');
+  el.className = 'msg' + (role === 'user' ? ' me' : '');
+  text(el, content);
+  $('log').append(el);
+  el.scrollIntoView({ block: 'end' });
+  return el;
+}
+
+async function ask(prompt) {
+  history.push({ role: 'user', content: prompt });
+  bubble('user', prompt);
+  const answer = bubble('assistant', '…');
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const started = performance.now();
+  let first = 0, tokens = 0, out = '';
+  const res = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: $('model').value || site.default_model, messages: history, stream: true }),
+  });
+  if (!res.ok || !res.body) { text(answer, explain(res.status)); answer.classList.add('error'); history.pop(); return; }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') continue;
+      const delta = JSON.parse(data).choices?.[0]?.delta?.content || '';
+      if (!delta) continue;
+      if (!first) first = performance.now();
+      tokens += 1;
+      out += delta;
+      text(answer, out);
+    }
+  }
+  const secs = (performance.now() - (first || started)) / 1000;
+  text(meta, `first token ${Math.round((first || performance.now()) - started)} ms · ${tokens} tokens · ${secs > 0 ? (tokens / secs).toFixed(1) : '–'} tok/s · ${$('model').value}`);
+  answer.append(meta);
+  history.push({ role: 'assistant', content: out });
+}
+
+$('ask').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const prompt = $('prompt').value.trim();
+  if (!prompt) return;
+  $('prompt').value = '';
+  $('send').disabled = true;
+  showError('');
+  try { await ask(prompt); } catch (e) { showError(e.message); }
+  $('send').disabled = false;
+  $('prompt').focus();
+};
+$('prompt').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); $('ask').requestSubmit(); }
+});
+
+loadSite().then(loadModels).catch((e) => showError(e.message));
+</script>
+</body>
+</html>

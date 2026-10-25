@@ -1,0 +1,656 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "w8s-agent.serviceAccountName" . }}
+{{- end }}
+{{- if .Values.rbac.create }}
+{{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+{{- $rw := list "get" "list" "watch" "create" "patch" "update" "delete" }}
+{{- $ro := list "get" "list" "watch" }}
+{{- $selfUpgrade := ne $caps.selfUpgrade.mode "off" }}
+{{- /*
+The agent's own objects live in cloudflared.namespace (the connector, its
+token Secret, the CloudflareTunnel, the Gateway) and the release namespace
+(the cluster's NATS login, the relay's import Services, the upgrade Job).
+They are granted by a Role in the release namespace when the two are the
+same - the default, and every documented install. A cloudflared.namespace
+elsewhere may not exist yet when this renders (the agent creates it), and
+a Role cannot be installed into a namespace that does not exist, so then
+those rules go into the ClusterRole as before.
+*/}}
+{{- $ownNsIsRelease := eq .Values.cloudflared.namespace .Release.Namespace }}
+{{- /*
+With explorer.namespaces or apps.namespaces set (the manage profile sets
+both to manage.namespaces), those writes are not granted cluster-wide at
+all: they go into ClusterRoles of their own, bound by a RoleBinding in each
+listed namespace - so the API server, not only the agent, keeps them there.
+*/}}
+{{- $writeNs := $caps.explorer.namespaces | default list }}
+{{- $appNs := $caps.apps.namespaces | default list }}
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}
+rules:
+  # --- Always: connecting the cluster ---------------------------------
+  # The agent ensures its own namespace exists; CI creates its own the
+  # same way.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create"]
+  # Validating a Service before it is published, finding the Gateway's
+  # Envoy Service, resolving ServiceExports.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: {{ toJson $ro }}
+  # A published route is an HTTPRoute in the Service's own namespace; the
+  # agent watches every HTTPRoute to report the ones people write.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: {{ toJson $rw }}
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses", "gateways", "grpcroutes"]
+    verbs: {{ toJson $ro }}
+  # Multi-Cluster Services (W3T-199): exports are observed; stale
+  # ServiceImports from before 0.11 are removed.
+  - apiGroups: ["multicluster.x-k8s.io"]
+    resources: ["serviceexports"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["multicluster.x-k8s.io"]
+    resources: ["serviceimports"]
+    verbs: ["get", "list", "watch", "delete"]
+  {{- if not $ownNsIsRelease }}
+  {{- include "w8s-agent.ownNamespaceRules" (dict "rw" $rw) | nindent 2 }}
+  {{- end }}
+  {{- if $caps.explorer.read }}
+  # --- capabilities.explorer.read ------------------------------------
+  # Every built-in kind the Explorer and the cluster scan list, by name.
+  # Not a wildcard: `*` also matches every subresource (nodes/proxy,
+  # pods/exec, attach, portforward, services/proxy), and a websocket
+  # upgrade is a GET.
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "persistentvolumes", "persistentvolumeclaims", "serviceaccounts", "configmaps", "endpoints", "limitranges", "resourcequotas", "events"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: {{ toJson $ro }}
+  # Read only, always: self-upgrade, the one thing that writes RBAC, runs
+  # under a ServiceAccount of its own below.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "clusterroles", "rolebindings", "clusterrolebindings"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csidrivers"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations", "validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    verbs: {{ toJson $ro }}
+  {{- /*
+  Custom resources (W3T-257), per rbac.customResources:
+    discovered  one rule per CRD group present at install/upgrade (lookup),
+                naming each plural - no subresource can match. A CRD
+                installed later is readable after the next upgrade.
+    all         every group and resource, subresources included.
+    none        CRDs are listed, their objects are not.
+  `helm template` has nothing to look up and renders `discovered` as no
+  rule.
+  */}}
+  {{- if eq .Values.rbac.customResources "all" }}
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: {{ toJson $ro }}
+  {{- else if eq .Values.rbac.customResources "discovered" }}
+  {{- $byGroup := dict }}
+  {{- range (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items | default list }}
+  {{- $plurals := get $byGroup .spec.group | default list }}
+  {{- $_ := set $byGroup .spec.group (append $plurals .spec.names.plural) }}
+  {{- end }}
+  {{- range $group := keys $byGroup | sortAlpha }}
+  - apiGroups: [{{ $group | quote }}]
+    resources: {{ get $byGroup $group | uniq | sortAlpha | toJson }}
+    verbs: {{ toJson $ro }}
+  {{- end }}
+  {{- else if ne .Values.rbac.customResources "none" }}
+  {{- fail "rbac.customResources must be one of: discovered, all, none" }}
+  {{- end }}
+  {{- end }}
+  {{- if $caps.explorer.secrets }}
+  # --- capabilities.explorer.secrets ---------------------------------
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: {{ toJson $ro }}
+  {{- end }}
+  {{- if and $caps.explorer.write (not $writeNs) }}
+  # --- capabilities.explorer.write, cluster-wide -----------------------
+  # What the agent could write before capabilities existed, less nodes and
+  # PersistentVolumes (cluster infrastructure; nothing in w8s edits them).
+  {{- include "w8s-agent.writeRules" (dict "rw" $rw "secrets" $caps.explorer.secrets) | nindent 2 }}
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["patch", "update", "delete"]
+  {{- end }}
+  {{- if $caps.logs }}
+  # --- capabilities.logs ---------------------------------------------
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: {{ toJson $ro }}
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  {{- end }}
+  {{- if $caps.exec }}
+  # --- capabilities.exec (W3T-273) -----------------------------------
+  # `create` is what the websocket exec needs; `get` what older API
+  # servers checked. Used only where kubectl through w8s is off (no
+  # people here): elsewhere a pod shell runs as the person, under your
+  # RBAC. The hub keeps the agent's own shells to organization admins.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  {{- end }}
+  {{- if $caps.kubectl.enabled }}
+  # --- capabilities.kubectl ------------------------------------------
+  # Everything a person does through w8s runs as the person: the agent
+  # sets Impersonate-User (w8s:<their email>) and Impersonate-Group from
+  # their token, which it verifies itself, and the API server applies
+  # *your* RBAC to them and names them in your audit log. Groups by name
+  # only - never system:masters. Users cannot be
+  # named in advance; the agent refuses every `system:` user itself
+  # (crates/w8s-agent/src/kube_proxy.rs). Not serviceaccounts: nothing
+  # needs to act as a workload.
+  {{- with $caps.kubectl.allowedGroups }}
+  - apiGroups: [""]
+    resources: ["groups"]
+    resourceNames: {{ toJson . }}
+    verbs: ["impersonate"]
+  {{- end }}
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  # The organization's access policy, set on the hub, becomes bindings
+  # the agent writes (crates/w8s-agent/src/access_bindings.rs). It may
+  # `bind` exactly the three roles access-roles.yaml ships and no other:
+  # the API server's escalation check refuses a binding to any role the
+  # agent cannot itself bind, so even a hub told to grant cluster-admin
+  # gets 403. The verbs on bindings themselves cannot be narrowed by
+  # name (the per-person bindings are named after the person); with
+  # admissionPolicy.enabled the API server also refuses every binding of
+  # the agent's that is not a `w8s-access-*` one to these roles.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames:
+      - {{ include "w8s-agent.fullname" . }}-view
+      - {{ include "w8s-agent.fullname" . }}-edit
+      - {{ include "w8s-agent.fullname" . }}-admin
+    verbs: ["bind"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings", "rolebindings"]
+    verbs: {{ toJson $rw }}
+  {{- end }}
+  {{- if $caps.apps.enabled }}
+  # --- capabilities.apps (docs/app-deployments.md) -------------------
+  # The hub's declared apps are AppInstallation objects, each installed
+  # with Helm as this ServiceAccount - so the kinds those charts contain,
+  # and Secrets, where Helm keeps its releases. Which namespaces and chart
+  # sources is capabilities.apps.namespaces / chartSources, which the
+  # agent checks before running Helm.
+  - apiGroups: ["w8s.cloud"]
+    resources: ["appinstallations"]
+    verbs: {{ toJson $rw }}
+  - apiGroups: ["w8s.cloud"]
+    resources: ["appinstallations/status"]
+    verbs: ["get", "patch", "update"]
+  {{- if not $appNs }}
+  {{- include "w8s-agent.appRules" (dict "rw" $rw) | nindent 2 }}
+  {{- end }}
+  {{- end }}
+  {{- if not $writeNs }}
+  {{- /*
+  CI builds (w8s-ci: the registry Deployment and Service, its claim and
+  credentials, one Job per build). Cluster-wide here, because that
+  namespace is created on first use and a Role cannot wait for it; the
+  agent keeps the feature to its namespace. With explorer.namespaces set
+  (the manage profile) it is bound in its namespace instead, below.
+  */}}
+  {{- if $caps.ci }}
+  {{- include "w8s-agent.ciRules" (dict "rw" $rw "ro" $ro) | nindent 2 }}
+  {{- end }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "w8s-agent.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+# The agent's own objects in its own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}
+rules:
+  {{- if $ownNsIsRelease }}
+  {{- include "w8s-agent.ownNamespaceRules" (dict "rw" $rw) | nindent 2 }}
+  {{- end }}
+  # The cluster's NATS login (crates/w8s-agent/src/cluster_login.rs) and
+  # the Services the relay listens behind for imported Services.
+  - apiGroups: [""]
+    resources: ["secrets", "services"]
+    verbs: {{ toJson $rw }}
+  # The NATS leaf's pod, by name: restarted once after the cluster's first
+  # login, so the leaf leaves the join token (cluster_login.rs).
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: [{{ printf "%s-nats-0" (include "w8s-agent.fullname" .) | quote }}]
+    verbs: ["delete"]
+  # The audit record of hub commands (crates/w8s-agent/src/audit.rs): its
+  # one ConfigMap, by name; `create` cannot be named.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["w8s-agent-audit"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  {{- if $selfUpgrade }}
+  # The upgrade Job (capabilities.selfUpgrade), which runs as the
+  # ServiceAccount below, not this one.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: {{ toJson $rw }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "w8s-agent.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+---
+# Imported Services answer to cluster.<remote> names (W3T-199,
+# crates/w8s-agent/src/cluster_dns.rs): the agent adds a forwarding block
+# to the cluster's CoreDNS (or kube-dns stub domains). Those ConfigMaps,
+# by name; `create` cannot be named, and is only used for coredns-custom.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-dns
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["coredns", "coredns-custom", "kube-dns"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-dns
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "w8s-agent.fullname" . }}-dns
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if $writeNs }}
+{{- /*
+Scoped (manage): CI is bound by RoleBinding in its own namespace, which
+the chart creates when it does not exist yet - with the labels and
+annotation the hub's own Namespace manifest carries (w8s-http
+ci::namespace_manifest), so the hub's later apply of the same Namespace
+agrees with it rather than conflicting, and kept on `helm uninstall`,
+because builds live there.
+*/}}
+{{- if $caps.ci }}
+{{- $ns := "w8s-ci" }}
+{{- if not (lookup "v1" "Namespace" "" $ns) }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    app.kubernetes.io/managed-by: w8s
+    app.kubernetes.io/part-of: {{ $ns }}
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    w8s.cloud/managed: "true"
+    helm.sh/resource-policy: keep
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "w8s-agent.fullname" $ }}
+  namespace: {{ $ns }}
+rules:
+  {{- include "w8s-agent.ciRules" (dict "rw" $rw "ro" $ro) | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" $ }}
+  namespace: {{ $ns }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "w8s-agent.fullname" $ }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- if .Values.manage.createNamespaces }}
+{{- range $ns := (concat $writeNs $appNs | uniq) }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+{{- end }}
+{{- end }}
+{{- if and $caps.explorer.write $writeNs }}
+---
+# capabilities.explorer.write, only where explorer.namespaces says.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-write
+rules:
+  {{- include "w8s-agent.writeRules" (dict "rw" $rw "secrets" $caps.explorer.secrets) | nindent 2 }}
+{{- range $ns := $writeNs }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" $ }}-write
+  namespace: {{ $ns }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "w8s-agent.fullname" $ }}-write
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- if and $caps.apps.enabled $appNs }}
+---
+# capabilities.apps, only where apps.namespaces says.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-apps
+rules:
+  {{- include "w8s-agent.appRules" (dict "rw" $rw) | nindent 2 }}
+{{- range $ns := $appNs }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" $ }}-apps
+  namespace: {{ $ns }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "w8s-agent.fullname" $ }}-apps
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- if $caps.explorer.read }}
+{{- /*
+The cluster scan (crates/w8s-agent/src/scan_job.rs): a Job of the
+w8s-clusterscan image (scanner.image) the agent writes and starts in this
+namespace when a scan is asked for, reads the report from, and deletes.
+It runs as a ServiceAccount of its own that can read exactly what the
+scanner collects - no Secrets, no writes, no subresources - so the scan
+has the read access explorer.read already gives the agent, and nothing
+it does needs the agent's own credentials. The agent's part is a Role
+here: start and remove Jobs, find the Job's pod, read its log.
+*/}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-scanner
+  labels:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}-scanner
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods", "services", "persistentvolumes", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csidrivers"]
+    verbs: ["get", "list"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "clusterroles", "rolebindings", "clusterrolebindings"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["get", "list"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses", "gateways", "httproutes", "grpcroutes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "w8s-agent.fullname" . }}-scanner
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.fullname" . }}-scanner
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-scan
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-scan
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "w8s-agent.fullname" . }}-scan
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if and $caps.shell $caps.kubectl.enabled }}
+{{- /*
+The cluster terminal (capabilities.shell, crates/w8s-agent/src/
+cluster_shell.rs): one short-lived pod per open terminal, in a namespace of
+its own, holding the person's token and no Kubernetes credential. The
+agent creates, execs into and deletes pods there and nowhere else for it -
+a Role, not a ClusterRole, so the API server keeps it to this namespace.
+Pod Security `restricted` is enforced on the namespace, so not even the
+agent can run anything stronger there. Kept on `helm uninstall` like
+w8s-ci, and created here only when it does not exist yet.
+*/}}
+{{- if not (lookup "v1" "Namespace" "" "w8s-shell") }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: w8s-shell
+  labels:
+    app.kubernetes.io/managed-by: w8s
+    app.kubernetes.io/part-of: w8s-shell
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    w8s.cloud/managed: "true"
+    helm.sh/resource-policy: keep
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-shell
+  namespace: w8s-shell
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}-shell
+  namespace: w8s-shell
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "w8s-agent.fullname" . }}-shell
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if $selfUpgrade }}
+{{- /*
+The self-upgrade Job's own ServiceAccount (crates/w8s-agent/src/
+chart_upgrade.rs), for capabilities.selfUpgrade approve or auto. `helm
+upgrade` of this chart renders ClusterRoles, CRDs, admission policies and
+webhooks, and a newer chart may grant what nothing here holds yet - which
+Kubernetes allows only to a subject that may `escalate` and `bind`. That is
+cluster-admin in all but name, so it is bound to cluster-admin by name, on
+a ServiceAccount nothing but that Job uses, rather than folded into the
+agent's own role where it used to be.
+
+Not a hard boundary on its own: a subject that can create pods in this
+namespace can run one as this ServiceAccount. The agent refuses to (its
+manifest policy), and the lower install profiles take pod creation there
+away; this separation is what makes those two steps mean something.
+*/}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "w8s-agent.upgradeServiceAccountName" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}-upgrade
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "w8s-agent.upgradeServiceAccountName" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "w8s-agent.upgradeServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

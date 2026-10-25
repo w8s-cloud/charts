@@ -1,0 +1,111 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- if and .Values.admissionPolicy.enabled .Values.rbac.create }}
+{{- if not (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy") }}
+{{- fail "admissionPolicy.enabled needs ValidatingAdmissionPolicy (admissionregistration.k8s.io/v1, Kubernetes 1.30+)" }}
+{{- end }}
+{{- /*
+A third line behind the chart's RBAC and the agent's own policy
+(crates/w8s-agent/src/policy.rs): the API server itself refuses these
+requests from the agent's ServiceAccount, whatever RBAC a later change or
+a hand edit grants it, and whatever the agent binary does. Keyed to that
+one ServiceAccount (matchConditions), so nothing else in the cluster is
+affected. Installed by whoever runs `helm install`; the agent cannot
+change it (it has no admission write).
+
+  - no writes to RBAC, admission, CRDs or certificate requests - except,
+    with kubectl through w8s on, the access policy's own bindings
+    (access-roles.yaml): a ClusterRoleBinding or RoleBinding named
+    `w8s-access-*`, labelled `w8s.cloud/access`, to one of the chart's
+    three roles for people and nothing else; a delete only of one so
+    labelled
+  - no writes in kube-system, except the named cluster DNS ConfigMaps the
+    agent edits for imported Services
+  - no pod, and no workload template, that is privileged, uses the host's
+    network, PID or IPC namespace, a hostPath volume or a hostPort, or adds
+    a capability beyond Pod Security baseline's
+
+Absent request fields (subResource, namespace, name) are absent, not
+empty, in CEL - hence the has() guards. Exec (CONNECT) is not matched: the pod shell is a feature, governed by
+capabilities.exec.
+*/}}
+{{- $sa := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "w8s-agent.serviceAccountName" .) }}
+{{- $name := printf "%s-guard" (include "w8s-agent.fullname" .) }}
+{{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+{{- $prefix := include "w8s-agent.fullname" . }}
+{{- $accessRoles := list (printf "%s-view" $prefix) (printf "%s-edit" $prefix) (printf "%s-admin" $prefix) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["*"]
+  matchConditions:
+    - name: from-the-w8s-agent
+      expression: {{ printf "request.userInfo.username == %q" $sa | quote }}
+  variables:
+    - name: podSpec
+      expression: >-
+        request.operation == 'DELETE' || (has(request.subResource) && request.subResource != '') ? null :
+        request.resource.resource == 'pods' ? object.spec :
+        request.resource.resource in ['deployments', 'statefulsets', 'daemonsets', 'replicasets', 'jobs']
+          && has(object.spec.template) && has(object.spec.template.spec) ? object.spec.template.spec :
+        null
+    - name: containers
+      expression: >-
+        variables.podSpec == null ? [] :
+        (has(variables.podSpec.containers) ? variables.podSpec.containers : []) +
+        (has(variables.podSpec.initContainers) ? variables.podSpec.initContainers : [])
+  validations:
+    - expression: >-
+        !(request.resource.group in ['admissionregistration.k8s.io', 'apiextensions.k8s.io', 'certificates.k8s.io'])
+      message: "the w8s agent may not write admission, CRDs or certificate requests"
+    {{- if $caps.kubectl.enabled }}
+    - expression: >-
+        request.resource.group != 'rbac.authorization.k8s.io' || (
+          request.resource.resource in ['clusterrolebindings', 'rolebindings'] &&
+          has(request.name) && request.name.startsWith('w8s-access-') &&
+          (request.operation == 'DELETE' ?
+            (has(oldObject.metadata.labels) && 'w8s.cloud/access' in oldObject.metadata.labels) :
+            (has(object.metadata.labels) && 'w8s.cloud/access' in object.metadata.labels &&
+              object.roleRef.kind == 'ClusterRole' && object.roleRef.name in {{ toJson $accessRoles }})))
+      message: "the w8s agent may write no RBAC beyond its own w8s-access-* bindings to the chart's view, edit and admin roles"
+    {{- else }}
+    - expression: "request.resource.group != 'rbac.authorization.k8s.io'"
+      message: "the w8s agent may not write RBAC"
+    {{- end }}
+    - expression: >-
+        !has(request.namespace) || request.namespace != 'kube-system' ||
+        (request.resource.resource == 'configmaps' && has(request.name) &&
+          request.name in ['coredns', 'coredns-custom', 'kube-dns'])
+      message: "the w8s agent may not write in kube-system beyond the cluster DNS ConfigMaps"
+    - expression: >-
+        variables.podSpec == null || (
+          !(has(variables.podSpec.hostNetwork) && variables.podSpec.hostNetwork) &&
+          !(has(variables.podSpec.hostPID) && variables.podSpec.hostPID) &&
+          !(has(variables.podSpec.hostIPC) && variables.podSpec.hostIPC) &&
+          !(has(variables.podSpec.volumes) && variables.podSpec.volumes.exists(v, has(v.hostPath))))
+      message: "the w8s agent may not create a pod in the host's namespaces or with a hostPath volume"
+    - expression: >-
+        variables.containers.all(c,
+          !(has(c.securityContext) && has(c.securityContext.privileged) && c.securityContext.privileged) &&
+          !(has(c.ports) && c.ports.exists(p, has(p.hostPort) && p.hostPort > 0)) &&
+          !(has(c.securityContext) && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.add) &&
+            c.securityContext.capabilities.add.exists(a, !(a in ['AUDIT_WRITE', 'CHOWN', 'DAC_OVERRIDE', 'FOWNER',
+              'FSETID', 'KILL', 'MKNOD', 'NET_BIND_SERVICE', 'SETFCAP', 'SETGID', 'SETPCAP', 'SETUID', 'SYS_CHROOT']))))
+      message: "the w8s agent may not create a privileged container, a hostPort, or add capabilities beyond Pod Security baseline"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+spec:
+  policyName: {{ $name }}
+  validationActions: [Deny]
+{{- end }}
+{{- end }}

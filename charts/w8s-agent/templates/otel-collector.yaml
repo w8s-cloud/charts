@@ -1,0 +1,260 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- if .Values.observability.enabled }}
+{{- /*
+The cluster's OpenTelemetry Collector (W3T-191). One pod, standard OTel:
+workloads that already speak OTLP point OTEL_EXPORTER_OTLP_ENDPOINT at the
+Service below and need nothing w8s-specific; the k8s_cluster receiver adds
+a small, fixed set of Kubernetes health metrics with no instrumentation at
+all. Everything goes to the agent's OTLP endpoint (the Service at the end of
+this file), which forwards each export to the hub over the control bus as
+this cluster (crates/w8s-agent/src/otlp_forward.rs), so the collectors hold
+no credential at all. Templated here rather than pulled in as the upstream
+opentelemetry-collector chart: this is ~150 lines against a chart that
+would bring its own opinions on modes, presets and RBAC, none of which
+this needs.
+*/ -}}
+{{- $name := include "w8s-agent.otelName" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      {{- if .Values.observability.kubernetes.enabled }}
+      k8s_cluster:
+        auth_type: serviceAccount
+        collection_interval: {{ .Values.observability.kubernetes.interval }}
+        node_conditions_to_report: [Ready, MemoryPressure, DiskPressure]
+        allocatable_types_to_report: [cpu, memory]
+      {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 160
+        spike_limit_mib: 40
+      # k8s_cluster emits a metric per pod, per container, per resource
+      # quota and more; the hub keeps a bounded window per cluster
+      # (crates/w8s-http/src/telemetry.rs), so only the handful that
+      # answer "is this cluster healthy" go up. Widen here, not there.
+      filter/kubernetes:
+        error_mode: ignore
+        metric_conditions:
+          # Character classes instead of backslash escapes, so the pattern
+          # reads the same whether or not OTTL unescapes string literals.
+          - not IsMatch(metric.name, "^k8s[.](node[.]condition_.*|node[.]allocatable[._].*|deployment[.].*|daemonset[.].*|statefulset[.].*|pod[.]phase|container[.]restarts|container[.]ready)$")
+      batch:
+        timeout: 10s
+        send_batch_size: 512
+      {{- if .Values.observability.traces.enabled }}
+      # Spans are sampled here, before they leave the cluster: the hub
+      # keeps a short tail of what failed and what was slow, and a busy
+      # service's every span would be bus bandwidth and collector CPU for
+      # nothing. By trace id, so a trace keeps all its spans or none.
+      probabilistic_sampler:
+        sampling_percentage: {{ .Values.observability.traces.samplePercent }}
+      {{- end }}
+
+    exporters:
+      otlphttp/w8s:
+        endpoint: {{ include "w8s-agent.otlpHubEndpoint" . | quote }}
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+        sending_queue:
+          enabled: true
+          queue_size: 200
+
+    service:
+      extensions: [health_check]
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/w8s]
+        {{- if .Values.observability.kubernetes.enabled }}
+        metrics/kubernetes:
+          receivers: [k8s_cluster]
+          processors: [memory_limiter, filter/kubernetes, batch]
+          exporters: [otlphttp/w8s]
+        {{- end }}
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/w8s]
+        {{- if .Values.observability.traces.enabled }}
+        # Off: no traces pipeline, and the OTLP receiver refuses a span at
+        # the door (observability.traces.enabled=false), so nothing
+        # buffers for a hub that will never see it.
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, probabilistic_sampler, batch]
+          exporters: [otlphttp/w8s]
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+# Its own ServiceAccount, not the agent's: the agent's ClusterRole can write
+# almost anything, and a collector only needs to watch.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+{{- if .Values.observability.kubernetes.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+rules:
+  # What the k8s_cluster receiver lists and watches (its README's RBAC
+  # section), read-only throughout.
+  - apiGroups: [""]
+    resources: ["events", "namespaces", "namespaces/status", "nodes", "nodes/spec", "persistentvolumes", "persistentvolumeclaims", "pods", "pods/status", "replicationcontrollers", "replicationcontrollers/status", "resourcequotas", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # Same reasoning as the agent Deployment's checksum/secret: the
+        # ConfigMap is mounted, and a config change alone leaves the pod
+        # spec untouched, so hash what it is rendered from to force the
+        # rollout. (Including this file would recurse.)
+        checksum/config: {{ .Values.observability | toYaml | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: otel-collector
+          image: {{ .Values.observability.image }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - --config=/conf/config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+          # memory_limiter above is tuned to the memory limit here (160MiB
+          # hard, 40MiB spike, out of 256Mi) - change both.
+          resources: {{- toYaml .Values.observability.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+      nodeSelector: {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity: {{- toYaml .Values.affinity | nindent 8 }}
+---
+# The agent's OTLP endpoint (W8S_OTLP_LISTEN in deployment.yaml): both
+# collectors export here, and the agent forwards each export to the hub
+# over the control bus.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "w8s-agent.otlpHubName" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: otlp-hub
+      port: 4319
+      targetPort: otlp-hub
+{{- end }}
+{{- end }}

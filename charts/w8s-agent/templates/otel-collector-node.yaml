@@ -1,0 +1,217 @@
+{{- if eq (include "w8s-agent.clusterWide" .) "true" }}
+{{- if and .Values.observability.enabled .Values.observability.nodeMetrics.enabled }}
+{{- /*
+Per-node network/storage metrics (W3T-191 follow-up). Separate DaemonSet
+from otel-collector.yaml's single Deployment on purpose: the kubeletstats
+receiver reads its own node's kubelet summary API
+(https://<node-ip>:10250/stats/summary) - a collector only ever sees the
+node it runs on, so one Deployment replica cannot cover a multi-node
+cluster the way k8s_cluster (an API-server watch, node-agnostic) can. One
+pod per node is the only shape that works.
+
+Everything else mirrors otel-collector.yaml: the same way to the hub (the
+agent's OTLP endpoint), the same curated-filter-not-wide-caps philosophy.
+Its own ServiceAccount/ClusterRole (nodes/stats only) rather
+than reusing the Deployment collector's - narrower blast radius if either
+is ever compromised.
+*/ -}}
+{{- $name := printf "%s-node" (include "w8s-agent.otelName" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      # https://<node-ip>:10250 - the kubelet listens on the node's real
+      # interface, not localhost, so this reaches it without hostNetwork.
+      # status.hostIP (not the node name) is what resolves without relying
+      # on cluster DNS having a record for the node at all.
+      kubeletstats:
+        collection_interval: {{ .Values.observability.nodeMetrics.interval }}
+        auth_type: serviceAccount
+        endpoint: "https://${env:K8S_NODE_IP}:10250"
+        # Every "any conformant Kubernetes" cluster this product targets
+        # (k3s, kubeadm, managed) uses a kubelet serving cert this collector
+        # has no reason to already trust, and there is no CA-distribution
+        # story for it (unlike the agent's own relay CA) - skip verification
+        # rather than fail closed on every bring-your-own cluster. The
+        # ServiceAccount bearer, not the TLS chain, is what authenticates
+        # this collector to the kubelet.
+        insecure_skip_verify: true
+        # container excluded on purpose: node+pod already answer "which pod
+        # is using the network/disk", and per-container multiplies the
+        # series count for a breakdown nothing here surfaces yet.
+        #
+        # volume is in for the cluster page's Storage card (W3T-274): how
+        # full a PersistentVolumeClaim is exists only in the kubelet's
+        # summary, and this collector already reads that summary with a
+        # ServiceAccount that already holds `nodes/stats`. Sending it from
+        # here is what lets the hub answer "how full is this claim"
+        # without granting the *agent* `nodes/proxy` - a key to every
+        # kubelet endpoint on every node - to fetch numbers that are
+        # already being collected. Bounded by the number of claims, not by
+        # what runs on the nodes.
+        metric_groups: [node, pod, volume]
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 96
+        spike_limit_mib: 24
+      # Network and filesystem per node and pod, plus each node's CPU and
+      # memory in use - what the hub's fleet capacity reads against the
+      # allocatable k8s_cluster reports, with no metrics-server and no scan.
+      # Node-level only for CPU/memory: per-pod would multiply the series
+      # for a breakdown nothing surfaces yet. `cpu.utilization` is the
+      # pre-0.9x name of `cpu.usage` (cores either way), kept so an older
+      # collector image still reports. Widen here, not in the hub's caps.
+      #
+      # `k8s.volume.capacity|available` back the Storage card. The volume
+      # group also emits inode counts, which nothing divides, so they are
+      # left out. Both halves of the pair are required: the receiver
+      # reports free space and never used, so the hub derives used as
+      # capacity minus available (http/storage.rs) and dropping either one
+      # silently empties the card rather than halving it.
+      filter/nodestats:
+        error_mode: ignore
+        metric_conditions:
+          - not IsMatch(metric.name, "^k8s[.]((node|pod)[.](network[.](io|errors)|filesystem[.](usage|capacity))|node[.](cpu[.](usage|utilization)|memory[.]working_set)|volume[.](capacity|available))$")
+      batch:
+        timeout: 10s
+        send_batch_size: 512
+
+    exporters:
+      otlphttp/w8s:
+        endpoint: {{ include "w8s-agent.otlpHubEndpoint" . | quote }}
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+        sending_queue:
+          enabled: true
+          queue_size: 200
+
+    service:
+      extensions: [health_check]
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        metrics:
+          receivers: [kubeletstats]
+          processors: [memory_limiter, filter/nodestats, batch]
+          exporters: [otlphttp/w8s]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+rules:
+  # What the kubeletstats receiver's serviceAccount auth needs - read-only,
+  # and only the kubelet's own stats surface (/stats/summary), not the
+  # broader node object. Not nodes/proxy: that is every kubelet endpoint,
+  # exec and run included, and the receiver's own RBAC documentation asks
+  # for more than nodes/stats only for extra_metadata_labels or the
+  # request/limit utilization metrics - neither of which this config uses.
+  - apiGroups: [""]
+    resources: ["nodes/stats"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ .Values.observability | toYaml | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: otel-collector
+          image: {{ .Values.observability.image }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - --config=/conf/config.yaml
+          env:
+            - name: K8S_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+          # memory_limiter above is tuned to the memory limit here.
+          resources: {{- toYaml .Values.observability.nodeMetrics.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+      # The whole point of a DaemonSet here is every node, including a
+      # single-node k3s control plane - the most common shape for this
+      # product's own target ("bring your own cluster"). .Values.tolerations
+      # is for the agent's own scheduling preferences, not necessarily
+      # this monitoring pod's, so the standard control-plane taints (both
+      # the current and the pre-1.24 label) are tolerated unconditionally
+      # in addition to whatever the chart's own tolerations add.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        {{- with .Values.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}
+{{- end }}

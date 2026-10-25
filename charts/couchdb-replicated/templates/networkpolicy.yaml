@@ -1,0 +1,27 @@
+{{- if .Values.isolate }}
+# Partition drill: this site's CouchDB can reach, and be reached from, its
+# own namespace and DNS only. Pulls from peers stall and retry; peers'
+# pulls from here do the same. Writes keep working on both sides. Set
+# isolate=false to heal, and watch the replication table catch up.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cr.name" . }}-isolate
+  labels:
+    {{- include "cr.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: couchdb
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+{{- end }}

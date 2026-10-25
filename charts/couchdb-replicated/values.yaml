@@ -1,0 +1,83 @@
+# Install this chart once per cluster, with the same release name, namespace
+# and credentials everywhere; only clusterId and peers differ. See README.md.
+
+# This cluster's w8s cluster id: the name the other clusters of the
+# organisation know it by (Clusters page, or `wctl clusters`). Required.
+clusterId: ""
+
+# The ids of the other clusters running this chart. Each one's CouchDB is
+# pulled from through the Service w8s imports for it here. Leave empty to
+# run a single, unreplicated site.
+peers: []
+#  - edge-b
+#  - edge-c
+
+# The admin account. Replication authenticates to each peer with it, so it
+# must be the same in every cluster. Prefer existingSecret (keys `username`
+# and `password`); `password` is for a quick try and ends up in the
+# release's values.
+auth:
+  existingSecret: ""
+  username: admin
+  password: ""
+
+# The database the guestbook writes to and that is replicated.
+database: guestbook
+
+couchdb:
+  image: couchdb:3.4.2
+  pullPolicy: IfNotPresent
+  # The exported Service's name. Peers find it as
+  # <name>--<namespace>--<cluster>, so it must match in every cluster.
+  serviceName: couchdb
+  storage:
+    size: 5Gi
+    storageClassName: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+replication:
+  # Pull continuously. false replicates once per reconcile pass instead,
+  # which is the slowest, most batch-like shape.
+  continuous: true
+  # How often a running replication records how far it got. A dropped
+  # tunnel resumes from the last checkpoint, never from zero.
+  checkpointIntervalMs: 30000
+  # Keep the load on the tunnel low: one worker, small batches.
+  workerProcesses: 1
+  workerBatchSize: 100
+  connectionTimeoutMs: 30000
+  # How often the wiring sidecar re-asserts the replication documents
+  # (and, with continuous: false, runs the one-shot pulls).
+  reconcileSeconds: 60
+  # Where the w8s agent puts imported Services (the agent chart's
+  # namespace).
+  importNamespace: w8s-system
+  # Hostnames to reach a peer's CouchDB at, by cluster id, when the
+  # derived <service>--<namespace>--<cluster> name does not apply (it
+  # does not when that name is over 63 characters; the agent then uses a
+  # hashed name, shown on the cluster's Services page).
+  peerHosts: {}
+  #  edge-b: w8s-import-0123456789abcdef.w8s-system.svc.cluster.local
+
+serviceExport:
+  enabled: true
+
+# The guestbook: a static page and a narrow API in front of CouchDB.
+app:
+  enabled: true
+  image: nginx:1.27-alpine
+  pullPolicy: IfNotPresent
+  replicas: 1
+  # Set the same hostname in every cluster to publish the app
+  # active/active: w8s puts every cluster behind it.
+  hostname: ""
+  gateway:
+    name: w8s-gateway
+    namespace: w8s-system
+
+# Cut this site off from its peers, both ways, with a NetworkPolicy, to
+# watch the others carry on and the site catch up when it is lifted. Needs
+# a CNI that enforces NetworkPolicy.
+isolate: false

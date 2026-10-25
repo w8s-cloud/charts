@@ -1,0 +1,69 @@
+# Install once per cluster. The GPU cluster runs the model; every other
+# cluster that wants it runs the client side. See README.md.
+
+# gpu: run Ollama and export it. client: reach the GPU cluster's export.
+# both: run Ollama and the client side in the same cluster.
+role: client
+
+# This cluster's w8s cluster id (as on the Clusters page). Shown on the
+# chat page; the GPU side does not need it.
+clusterId: ""
+
+# The shared key: the GPU cluster's gateway refuses anything without it,
+# and the client side adds it to every request. Same in every cluster.
+# Prefer existingSecret (key `apiKey`).
+apiKey:
+  existingSecret: ""
+  value: ""
+
+# ---- role: gpu (and both) ----
+ollama:
+  image: ollama/ollama:0.34.4
+  pullPolicy: IfNotPresent
+  # Models kept pulled; the models sidecar pulls what is missing and never
+  # deletes anything.
+  models:
+    - llama3.2:3b
+  # GPUs to request (nvidia.com/gpu). 0 runs on CPU: slow, but works
+  # anywhere, which is how to try this without a GPU.
+  gpus: 1
+  # e.g. "nvidia" when the cluster's NVIDIA runtime is not the default.
+  runtimeClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  # How long a model stays loaded after its last request.
+  keepAlive: 30m
+  storage:
+    size: 50Gi
+    storageClassName: ""
+  resources:
+    requests: {cpu: 500m, memory: 4Gi}
+    limits: {memory: 24Gi}
+
+# The exported Service in front of Ollama. Clients find it as
+# <name>--<namespace>--<gpu cluster>, so it must match on both sides.
+gateway:
+  serviceName: inference-gpu
+  image: nginx:1.27-alpine
+
+# ---- role: client (and both) ----
+client:
+  # The GPU cluster's w8s cluster id. Required for role: client.
+  gpuCluster: ""
+  # Where the w8s agent puts imported Services.
+  importNamespace: w8s-system
+  # The GPU gateway's host, when the derived import name does not apply
+  # (over 63 characters; the agent then hashes it).
+  gpuHost: ""
+  image: nginx:1.27-alpine
+  # In-cluster Service apps call: http://inference.<namespace>.svc/v1/...
+  serviceName: inference
+  # Publishes the chat page, and with it the API, on this hostname.
+  # Anyone who can reach it can use the model: leave empty unless it is
+  # behind access control.
+  hostname: ""
+  gateway:
+    name: w8s-gateway
+    namespace: w8s-system
+  # The model the chat page starts with.
+  defaultModel: llama3.2:3b

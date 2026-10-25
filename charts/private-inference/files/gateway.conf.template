@@ -1,0 +1,28 @@
+# The GPU cluster's gateway: the only way in to Ollama, which listens on
+# localhost in the same pod. Every request needs the shared key; this is
+# the Service w8s exports to your other clusters. __PLACEHOLDERS__ are
+# filled in at start by 40-render.sh.
+server {
+  listen 8080;
+  server_tokens off;
+  client_max_body_size 64m;
+
+  location = /healthz {
+    return 200 "ok\n";
+  }
+
+  location / {
+    if ($http_authorization != "Bearer __KEY__") {
+      return 401 '{"error":"missing or wrong key"}';
+    }
+    proxy_set_header Authorization "";
+    proxy_set_header Host 127.0.0.1;
+    # Tokens are streamed as they are generated: pass them on at once.
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_http_version 1.1;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+    proxy_pass http://127.0.0.1:11434;
+  }
+}

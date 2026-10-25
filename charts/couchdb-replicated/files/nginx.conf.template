@@ -1,0 +1,69 @@
+# The guestbook's front: the page, and a narrow API onto this cluster's
+# CouchDB. Only the requests below reach CouchDB; the admin credentials
+# are added here and never reach the browser. __PLACEHOLDERS__ are filled
+# in at start by 40-w8s-guestbook.sh.
+server {
+  listen 8080;
+  server_tokens off;
+  client_max_body_size 4k;
+
+  add_header X-Served-By-Cluster "__CLUSTER__" always;
+
+  location = / {
+    root /usr/share/nginx/html;
+    try_files /index.html =404;
+  }
+
+  location = /healthz {
+    return 200 "ok\n";
+  }
+
+  # Which cluster answered: the page shows it, so an active/active
+  # hostname can be seen landing on different sites.
+  location = /api/site {
+    default_type application/json;
+    return 200 '{"cluster":"__CLUSTER__","peers":"__PEERS__"}';
+  }
+
+  # Newest entries first. Ids are entry:<ISO time>:<cluster>:<random>,
+  # so id order is time order and no index is needed.
+  location = /api/entries {
+    limit_except GET POST { deny all; }
+    proxy_set_header Authorization "Basic __AUTH__";
+    proxy_set_header Content-Type application/json;
+    if ($request_method = POST) {
+      rewrite ^ /__DB__ break;
+    }
+    rewrite ^ /__DB__/_all_docs?include_docs=true&descending=true&limit=50&startkey=%22entry%3A%EF%BF%B0%22&endkey=%22entry%3A%22 break;
+    proxy_pass http://__COUCH__;
+  }
+
+  # The one shared document every site edits: where conflicts show up.
+  location = /api/banner {
+    limit_except GET PUT DELETE { deny all; }
+    proxy_set_header Authorization "Basic __AUTH__";
+    proxy_set_header Content-Type application/json;
+    rewrite ^ /__DB__/banner break;
+    proxy_pass http://__COUCH__;
+  }
+
+  # How far behind this site is: its database's size and sequence.
+  location = /api/db {
+    limit_except GET { deny all; }
+    proxy_set_header Authorization "Basic __AUTH__";
+    rewrite ^ /__DB__ break;
+    proxy_pass http://__COUCH__;
+  }
+
+  # State of each pull from a peer: running, pending, crashing, and why.
+  location = /api/replication {
+    limit_except GET { deny all; }
+    proxy_set_header Authorization "Basic __AUTH__";
+    rewrite ^ /_scheduler/docs/_replicator break;
+    proxy_pass http://__COUCH__;
+  }
+
+  location / {
+    return 404;
+  }
+}

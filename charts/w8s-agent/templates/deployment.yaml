@@ -1,0 +1,249 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "w8s-agent.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "w8s-agent.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # The join token is read from the Secret via secretKeyRef, which is
+        # only read at container start - a `helm upgrade` that changes
+        # joinToken.value but leaves the rest of the pod spec untouched
+        # produces zero diff in the Deployment object, so Kubernetes never
+        # rolls the pod and the agent keeps running with its old token.
+        # Confirmed live (deploy-hub.yml run #35): the relay minted a fresh
+        # join-token and reset the cluster's status to join_requested, but
+        # the already-running agent pod (unchanged since an earlier run)
+        # never restarted to consume it, so that cluster never reached
+        # connected while the stale pod kept heartbeating under its
+        # original registration. Hashing the rendered Secret into this
+        # annotation changes the pod template - and forces a rollout -
+        # whenever the token actually changes.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        # The leaf's token, read at start like the join token.
+        checksum/nats-token: {{ include "w8s-agent.natsToken" . | sha256sum | trunc 16 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "w8s-agent.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: agent
+          image: {{ include "w8s-agent.imageRef" .Values.image | quote }}
+          imagePullPolicy: {{ include "w8s-agent.imagePullPolicy" .Values.image }}
+          # No connection to the spoke relay: the agent works over the
+          # cluster's NATS leaf and the Kubernetes API.
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.rustLog | quote }}
+            # The release namespace: where the agent keeps the cluster's
+            # NATS login (mounted by the leaf and the relay), its audit
+            # record and the relay's import Services.
+            - name: W8S_AGENT_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            # What the agent needs to upgrade its own release from the hub
+            # (W3T-192, crates/w8s-agent/src/chart_upgrade.rs): the chart
+            # version it reports in heartbeats, and the release name,
+            # ServiceAccount and chart repository the upgrade Job uses. An
+            # agent without W8S_HELM_RELEASE refuses upgrade requests, and
+            # so does one told W8S_SELF_UPGRADE=off. The Job runs as its
+            # own ServiceAccount (templates/rbac.yaml), never the agent's.
+            {{- with .Values.ownTelemetry.endpoint }}
+            # The agent's own traces, metrics and logs, for w8s's own
+            # clusters only (values.yaml ownTelemetry; empty on every other).
+            - name: W8S_OWN_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            # The pod is the instance (service.instance.id): several own
+            # clusters' agents are as many series, not one.
+            - name: W8S_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ include "w8s-agent.ownResourceAttributes" $ | quote }}
+            {{- end }}
+            - name: W8S_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            - name: W8S_HELM_RELEASE
+              value: {{ .Release.Name | quote }}
+            {{- $caps := include "w8s-agent.capabilities" . | fromYaml }}
+            - name: W8S_SELF_UPGRADE
+              value: {{ $caps.selfUpgrade.mode | quote }}
+            {{- if ne $caps.selfUpgrade.mode "off" }}
+            - name: W8S_UPGRADE_SERVICE_ACCOUNT
+              value: {{ include "w8s-agent.upgradeServiceAccountName" . | quote }}
+            {{- end }}
+            # What w8s may do here (values.yaml `capabilities`): the agent
+            # refuses the rest itself and reports this set in its
+            # heartbeat (crates/w8s-agent/src/policy.rs).
+            - name: W8S_CAPABILITIES
+              value: {{ $caps | toJson | quote }}
+            {{- if $caps.kubectl.enabled }}
+            # The prefix of the chart's roles for people (templates/
+            # access-roles.yaml: <prefix>-view, -edit, -admin), which the
+            # access policy's bindings refer to (access_bindings.rs).
+            - name: W8S_ACCESS_ROLE_PREFIX
+              value: {{ include "w8s-agent.fullname" . | quote }}
+            {{- end }}
+            {{- if .Values.observability.enabled }}
+            # Where the agent sends its own cluster readings
+            # (crates/w8s-agent/src/cluster_resources.rs): the collector's
+            # OTLP/HTTP port, in this namespace.
+            - name: W8S_OTEL_ENDPOINT
+              value: {{ printf "http://%s:4318" (include "w8s-agent.otelName" .) | quote }}
+            # The collectors export here, behind the otlp-hub Service
+            # (templates/otel-collector.yaml); the agent forwards each export
+            # to the hub over the control bus (otlp_forward.rs).
+            - name: W8S_OTLP_LISTEN
+              value: "0.0.0.0:4319"
+            {{- end }}
+            - name: W8S_CHART_REPO_URL
+              value: {{ .Values.selfUpgrade.chartRepository | quote }}
+            # The image runs as nobody, who has no home; helm (app
+            # installs, crates/w8s-agent/src/app_installations.rs) needs
+            # one for its cache. Chart 0.23.1.
+            - name: HOME
+              value: /tmp
+            - name: W8S_CLOUDFLARED_NAMESPACE
+              value: {{ .Values.cloudflared.namespace | quote }}
+            - name: W8S_CLOUDFLARED_SECRET_NAME
+              value: {{ .Values.cloudflared.secretName | quote }}
+            - name: W8S_CLOUDFLARED_DEPLOYMENT_NAME
+              value: {{ include "w8s-agent.cloudflaredDeploymentName" . | quote }}
+            - name: W8S_CLOUDFLARE_TUNNEL_RESOURCE_NAME
+              value: {{ include "w8s-agent.tunnelResourceName" . | quote }}
+            - name: W8S_GATEWAY_NAME
+              value: {{ include "w8s-agent.gatewayName" . | quote }}
+            - name: W8S_GATEWAY_CLASS_NAME
+              value: {{ .Values.gateway.className | quote }}
+            - name: W8S_GATEWAY_LISTENER_PORT
+              value: {{ .Values.gateway.listenerPort | quote }}
+            # Who kubectl through w8s acts as (W3T-200, values.yaml
+            # kubeProxy, crates/w8s-agent/src/user_token.rs). `default dict`
+            # so a release upgraded with --reuse-values from a chart
+            # without the block renders the agent's own defaults.
+            {{- $kubeProxy := .Values.kubeProxy | default dict }}
+            {{- $oidc := $kubeProxy.oidc | default dict }}
+            - name: W8S_KUBE_PROXY_IDENTITY
+              value: {{ $kubeProxy.identity | default "impersonate" | quote }}
+            - name: W8S_OIDC_ISSUER
+              value: {{ $oidc.issuer | default "" | quote }}
+            - name: W8S_OIDC_JWKS_URL
+              value: {{ $oidc.jwksUrl | default "" | quote }}
+            - name: W8S_OIDC_AUDIENCE
+              value: {{ $oidc.audience | default "" | quote }}
+            - name: W8S_OIDC_ORGANIZATION_CLAIM
+              value: {{ $oidc.organizationClaim | default "" | quote }}
+            - name: W8S_OIDC_USERNAME_CLAIM
+              value: {{ $oidc.usernameClaim | default "" | quote }}
+            - name: W8S_OIDC_USERNAME_PREFIX
+              value: {{ $oidc.usernamePrefix | default "w8s:" | quote }}
+            - name: W8S_OIDC_GROUPS_CLAIM
+              value: {{ $oidc.groupsClaim | default "" | quote }}
+            - name: W8S_OIDC_GROUPS_PREFIX
+              value: {{ $oidc.groupsPrefix | default "" | quote }}
+            # hasKey, not `default`: an explicit "" turns organization
+            # groups off, which `default` would read as unset.
+            - name: W8S_OIDC_ORG_GROUPS_ROOT
+              value: {{ if hasKey $oidc "orgGroupsRoot" }}{{ $oidc.orgGroupsRoot | quote }}{{ else }}"/w8s-orgs"{{ end }}
+            {{- if $caps.explorer.read }}
+            # The cluster scan Job (values.yaml scanner, crates/w8s-agent/
+            # src/scan_job.rs): the image it runs and the read-only
+            # ServiceAccount it runs as (templates/rbac.yaml).
+            {{- $scanner := .Values.scanner | default dict }}
+            - name: W8S_SCANNER_IMAGE
+              value: {{ include "w8s-agent.imageRef" ($scanner.image | default dict) | quote }}
+            - name: W8S_SCANNER_PULL_POLICY
+              value: {{ include "w8s-agent.imagePullPolicy" ($scanner.image | default dict) | quote }}
+            - name: W8S_SCANNER_SERVICE_ACCOUNT
+              value: {{ printf "%s-scanner" (include "w8s-agent.fullname" .) | quote }}
+            {{- end }}
+            # The control bus (ADR-017): the NATS leaf next to the agent
+            # (templates/nats-leaf.yaml, crates/w8s-agent/src/control_bus.rs).
+            - name: W8S_NATS_URL
+              value: {{ printf "nats://%s-nats:4222" (include "w8s-agent.fullname" .) | quote }}
+            {{- include "w8s-agent.natsTokenEnv" . | nindent 12 }}
+            # The cluster's NATS login (crates/w8s-agent/src/cluster_login.rs):
+            # its key and the leaf's creds live in this Secret, which the
+            # agent writes; the join token gets the first login.
+            - name: W8S_CONTROL_BUS_SECRET
+              value: {{ include "w8s-agent.controlBusSecretName" . | quote }}
+            # Restarted once the join token has got the first login, so the
+            # leaf connects with it (templates/nats-leaf.yaml, one replica).
+            - name: W8S_CONTROL_BUS_LEAF_POD
+              value: {{ printf "%s-nats-0" (include "w8s-agent.fullname" .) | quote }}
+            - name: W8S_CONTROL_BUS_JOIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "w8s-agent.joinSecretName" . }}
+                  key: {{ .Values.joinToken.secretKey }}
+                  optional: true
+            {{- if and $caps.shell $caps.kubectl.enabled }}
+            # The cluster terminal (values.yaml shell, crates/w8s-agent/src/
+            # cluster_shell.rs): what its pod runs, and the hub its wctl
+            # signs in to.
+            {{- $shell := .Values.shell | default dict }}
+            - name: W8S_SHELL_IMAGE
+              value: {{ include "w8s-agent.imageRef" ($shell.image | default dict) | quote }}
+            - name: W8S_SHELL_API_URL
+              value: {{ $shell.apiUrl | default "https://www.w8s.cloud/api" | quote }}
+            {{- end }}
+            {{- if $caps.kubectl.enabled }}
+            # The Kubernetes API for verified people (crates/w8s-agent/src/
+            # kube_gateway.rs), behind templates/kube-gateway-service.yaml.
+            - name: W8S_KUBE_GATEWAY_LISTEN
+              value: "0.0.0.0:8001"
+            {{- end }}
+            # Imported Services answer to <svc>.<ns>.svc.cluster.<remote>
+            # (W3T-199, crates/w8s-agent/src/import_dns.rs): the agent serves
+            # those zones on this port, behind templates/dns-service.yaml,
+            # and points the cluster's resolver at that Service.
+            - name: W8S_DNS_LISTEN
+              value: "0.0.0.0:5353"
+            - name: W8S_DNS_SERVICE
+              value: {{ include "w8s-agent.dnsServiceName" . | quote }}
+          ports:
+            - name: dns-udp
+              containerPort: 5353
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 5353
+              protocol: TCP
+            {{- if $caps.kubectl.enabled }}
+            - name: kube-gateway
+              containerPort: 8001
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.observability.enabled }}
+            - name: otlp-hub
+              containerPort: 4319
+              protocol: TCP
+            {{- end }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      nodeSelector: {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity: {{- toYaml .Values.affinity | nindent 8 }}

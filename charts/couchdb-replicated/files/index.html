@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replicated guestbook</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #fff; --ink: #1b1b1a; --muted: #6b6b66; --line: #e4e3df;
+    --accent: #2f5bd3; --good: #1f7a4a; --warn: #9a6200; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --card: #1d1d1b; --ink: #eceae4; --muted: #9b9a94; --line: #2e2d2a;
+      --accent: #7b9cff; --good: #5cc48d; --warn: #e0a84a; --bad: #f08a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .site { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .site b { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  input { flex: 1 1 160px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+          background: var(--bg); color: var(--ink); font: inherit; }
+  button { padding: 7px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent);
+           color: #fff; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 500; color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 12px; }
+  .state-running { color: var(--good); } .state-pending { color: var(--warn); }
+  .state-crashing, .state-failed { color: var(--bad); }
+  .banner-text { font-size: 18px; }
+  .conflict { border-left: 3px solid var(--warn); padding: 6px 10px; margin-top: 8px; display: flex;
+              justify-content: space-between; gap: 8px; align-items: center; }
+  .error { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <h1>Replicated guestbook</h1>
+    <div class="site">served by <b id="cluster">…</b> <span class="muted" id="peers"></span></div>
+  </div>
+
+  <section class="card">
+    <h2>Banner: one document every site edits</h2>
+    <div class="banner-text" id="banner">…</div>
+    <div class="muted" id="banner-meta"></div>
+    <div id="conflicts"></div>
+    <form id="banner-form">
+      <input id="banner-input" placeholder="New banner text" maxlength="200" required>
+      <button>Set banner here</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Entries</h2>
+    <form id="entry-form">
+      <input id="entry-name" placeholder="Name" maxlength="40" required>
+      <input id="entry-message" placeholder="Message" maxlength="200" required>
+      <button>Sign</button>
+    </form>
+    <table>
+      <thead><tr><th>When</th><th>Written at</th><th>Name</th><th>Message</th></tr></thead>
+      <tbody id="entries"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Replication into this site</h2>
+    <p class="muted" id="db"></p>
+    <table>
+      <thead><tr><th>From</th><th>State</th><th>Written</th><th>Pending</th><th>Last update</th></tr></thead>
+      <tbody id="replication"></tbody>
+    </table>
+    <p class="muted">Each site pulls from every other site through the Service w8s imports for it,
+      replicated over the secure cluster connections.
+      A pull that loses its peer retries with backoff and resumes from its last checkpoint.</p>
+  </section>
+  <p class="error" id="error"></p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let site = '?';
+let banner = null;
+let losers = [];
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 404) throw new Error(`${path}: ${res.status} ${body.reason || body.error || ''}`);
+  return res.ok ? body : null;
+}
+
+function text(el, value) { el.textContent = value; return el; }
+function cell(value, cls) { const td = document.createElement('td'); if (cls) td.className = cls; return text(td, value ?? ''); }
+function ago(iso) {
+  if (!iso) return '';
+  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${Math.max(s, 0)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+async function loadSite() {
+  const s = await api('/api/site');
+  site = s.cluster;
+  text($('cluster'), s.cluster);
+  text($('peers'), s.peers.trim() ? `· pulls from ${s.peers.split(' ').filter(Boolean).join(', ')}` : '· no peers');
+}
+
+async function loadBanner() {
+  banner = await api('/api/banner?conflicts=true');
+  const box = $('conflicts');
+  box.replaceChildren();
+  if (!banner) { text($('banner'), 'No banner yet.'); text($('banner-meta'), ''); losers = []; return; }
+  text($('banner'), banner.text);
+  text($('banner-meta'), `set at ${banner.site}, ${ago(banner.at)}`);
+  losers = await Promise.all((banner._conflicts || []).map((rev) => api(`/api/banner?rev=${encodeURIComponent(rev)}`)));
+  if (!losers.length) return;
+  const note = document.createElement('p');
+  note.className = 'muted';
+  text(note, `${losers.length + 1} sites set the banner while apart. Every site shows the same winner; the others are kept until someone picks one.`);
+  box.append(note);
+  for (const rev of [banner, ...losers]) {
+    const row = document.createElement('div');
+    row.className = 'conflict';
+    const label = document.createElement('span');
+    text(label, `“${rev.text}” from ${rev.site}${rev === banner ? ' (shown)' : ''}`);
+    const keep = document.createElement('button');
+    keep.className = 'ghost';
+    text(keep, 'Keep this');
+    keep.onclick = () => resolve(rev).catch(showError);
+    row.append(label, keep);
+    box.append(row);
+  }
+}
+
+// Keep one revision: copy it onto the winning branch if it is not the
+// winner, then delete every losing branch. The deletions replicate like
+// any other change, so every site ends up with the same single revision.
+async function resolve(keep) {
+  if (keep !== banner) {
+    await api('/api/banner', { method: 'PUT',
+      body: JSON.stringify({ _rev: banner._rev, text: keep.text, site: keep.site, at: keep.at }) });
+  }
+  for (const rev of losers) {
+    await api(`/api/banner?rev=${encodeURIComponent(rev._rev)}`, { method: 'DELETE' });
+  }
+  await loadBanner();
+}
+
+async function loadEntries() {
+  const res = await api('/api/entries');
+  const rows = (res?.rows || []).map((r) => r.doc).filter(Boolean);
+  $('entries').replaceChildren(...rows.map((d) => {
+    const tr = document.createElement('tr');
+    const at = cell('');
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    text(tag, d.site);
+    at.append(tag);
+    tr.append(cell(ago(d.at), 'muted'), at, cell(d.name), cell(d.message));
+    return tr;
+  }));
+}
+
+async function loadReplication() {
+  const [db, rep] = await Promise.all([api('/api/db'), api('/api/replication')]);
+  if (db) text($('db'), `${db.doc_count} documents here, update sequence ${String(db.update_seq).split('-')[0]}.`);
+  const docs = (rep?.docs || []).filter((d) => d.doc_id.startsWith('from-'));
+  if (!docs.length) {
+    const tr = document.createElement('tr');
+    const td = cell('No pulls running. With no peers set, this site is on its own.', 'muted');
+    td.colSpan = 5;
+    tr.append(td);
+    $('replication').replaceChildren(tr);
+    return;
+  }
+  $('replication').replaceChildren(...docs.map((d) => {
+    const info = d.info || {};
+    const tr = document.createElement('tr');
+    const peer = d.doc_id.replace(/^from-/, '').replace(/-[0-9a-f]{12}$/, '');
+    const state = cell(d.state + (info.error ? `: ${info.error}` : ''), `state-${d.state}`);
+    tr.append(cell(peer, 'mono'), state, cell(info.docs_written ?? ''), cell(info.changes_pending ?? ''),
+              cell(ago(d.last_updated), 'muted'));
+    return tr;
+  }));
+}
+
+function showError(e) { text($('error'), e.message); }
+
+async function refresh() {
+  try {
+    await Promise.all([loadBanner(), loadEntries(), loadReplication()]);
+    text($('error'), '');
+  } catch (e) { showError(e); }
+}
+
+$('entry-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const at = new Date().toISOString();
+  const rand = Math.random().toString(36).slice(2, 8);
+  try {
+    await api('/api/entries', { method: 'POST', body: JSON.stringify({
+      _id: `entry:${at}:${site}:${rand}`, name: $('entry-name').value, message: $('entry-message').value, site, at }) });
+    $('entry-message').value = '';
+    await loadEntries();
+  } catch (e) { showError(e); }
+};
+
+$('banner-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const doc = { text: $('banner-input').value, site, at: new Date().toISOString() };
+  if (banner) doc._rev = banner._rev;
+  try {
+    await api('/api/banner', { method: 'PUT', body: JSON.stringify(doc) });
+    $('banner-input').value = '';
+    await loadBanner();
+  } catch (e) { showError(e); }
+};
+
+loadSite().then(refresh).catch(showError);
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
