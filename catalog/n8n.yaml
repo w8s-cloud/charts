@@ -1,0 +1,16 @@
+artifacthub: open-8gears/n8n
+name: n8n
+tagline: Workflow automation with a visual editor and 400+ integrations.
+description: |
+  Connect APIs, databases and AI models in workflows you draw, with code
+  where you need it. Self-hosted, so credentials and data stay in the
+  cluster. Community-maintained chart (8gears).
+tags: [Automation, Workflows, Integrations]
+category: other
+git: {repo: 8gears/n8n-helm-chart, path: charts/n8n, ref: 87df4bc4b8b76719ee5cbd749cdb22c19f6bcf0d}
+chart:
+  url: oci://8gears.container-registry.com/library/n8n
+  version: 2.1.1
+source: https://n8n.io
+logo: https://raw.githubusercontent.com/n8n-io/n8n/2f2bac4645472e5efc72c4efedaadff6ef50348e/packages/frontend/@n8n/design-system/src/components/N8nLogo/logo-icon.svg
+values: {main: {persistence: {enabled: true, type: dynamic}}}

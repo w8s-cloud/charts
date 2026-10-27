@@ -1,0 +1,15 @@
+artifacthub: stevehipwell/plantuml
+name: PlantUML Server
+tagline: Renders UML and other diagrams from text, over HTTP.
+description: |
+  Post the text of a diagram and get back an SVG or PNG. Wikis, code review
+  tools and documentation builds use it to keep diagrams in version control
+  as text rather than as binaries nobody can edit. Stateless: nothing to
+  persist and nothing to back up.
+tags: [Diagrams, UML, Docs]
+category: other
+git: {repo: stevehipwell/helm-charts, path: charts/plantuml, ref: plantuml-3.49.0}
+chart:
+  url: https://github.com/stevehipwell/helm-charts/releases/download/plantuml-3.49.0/plantuml-3.49.0.tgz
+  version: 3.49.0
+source: https://plantuml.com

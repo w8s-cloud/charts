@@ -1,0 +1,16 @@
+artifacthub: meilisearch-kubernetes/meilisearch
+name: Meilisearch
+tagline: Typo-tolerant full-text search with a simple HTTP API.
+description: |
+  A search engine for app and site search: index JSON documents, get
+  relevant results as the user types. One node with its index on a
+  persistent volume.
+tags: [Search, Full-text]
+category: db
+git: {repo: meilisearch/meilisearch-kubernetes, path: charts/meilisearch, ref: 0a8c491616a463e441856920f99b75af36ac3ae7}
+chart:
+  url: https://github.com/meilisearch/meilisearch-kubernetes/releases/download/meilisearch-0.40.0/meilisearch-0.40.0.tgz
+  version: 0.40.0
+source: https://www.meilisearch.com
+logo: https://raw.githubusercontent.com/meilisearch/meilisearch/909ef7fef5ba264dc914c4778d6328c5edca5ca7/assets/logo.svg
+values: {persistence: {enabled: true}}

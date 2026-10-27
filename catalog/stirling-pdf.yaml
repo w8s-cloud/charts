@@ -1,0 +1,15 @@
+artifacthub: stirling-pdf/stirling-pdf-chart
+name: Stirling-PDF
+tagline: Merge, split, convert, sign and OCR PDFs without sending them anywhere.
+description: |
+  More than fifty PDF operations in a web UI and an API, run on your own
+  cluster so contracts and invoices never leave it. Stateless: files are
+  processed and returned, not stored.
+tags: [PDF, Documents, OCR]
+category: productivity
+git: {repo: Stirling-Tools/Stirling-PDF-chart, path: charts/stirling-pdf, ref: f6eb36eeee7f54ac8f6a9cc055fd706b77cb6498}
+chart:
+  url: https://github.com/Stirling-Tools/Stirling-PDF-chart/releases/download/stirling-pdf-chart-3.1.0/stirling-pdf-chart-3.1.0.tgz
+  version: 3.1.0
+source: https://www.stirlingpdf.com
+logo: https://raw.githubusercontent.com/Stirling-Tools/Stirling-PDF/0b937e0cc1b0e719de56991c4e911bd686a55452/app/core/src/main/resources/static/favicon.svg

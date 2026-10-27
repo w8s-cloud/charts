@@ -1,0 +1,570 @@
+# Default values for nexus3.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  # -- Image repository for the default container.
+  repository: docker.io/sonatype/nexus3
+  # -- (string) Image tag for the default container, this will default to `.Chart.AppVersion` if not set and will be omitted if set to `-`.
+  tag:
+  # -- (string) Optional image digest for the default container.
+  digest:
+  # -- Image pull policy for the default container.
+  pullPolicy: IfNotPresent
+
+bashImage:
+  # -- Image repository for bash containers.
+  repository: cgr.dev/chainguard/bash
+  # -- Image tag for bash containers, this will be omitted if set to `-`.
+  tag: latest
+  # -- (string) Optional image digest for the bash containers.
+  digest:
+  # -- Image pull policy for bash containers.
+  pullPolicy: IfNotPresent
+
+jdkImage:
+  # -- Image repository for the JDK container.
+  repository: docker.io/eclipse-temurin
+  # -- Image tag for the JDK container, this will be omitted if set to `-`.
+  tag: 21-jdk
+  # -- (string) Optional image digest for the JDK container.
+  digest:
+  # -- Image pull policy for the JDK container.
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets.
+imagePullSecrets: []
+
+# -- (string) Override the name of the chart.
+nameOverride:
+
+# -- (string) Override the full name of the chart.
+fullnameOverride:
+
+# -- Labels to add to all chart resources.
+commonLabels: {}
+
+serviceAccount:
+  # -- If `true`, create a new `ServiceAccount`.
+  create: true
+  # -- Labels to add to the service account.
+  labels: {}
+  # -- Annotations to add to the service account.
+  annotations: {}
+  # -- (string) If this is set and `serviceAccount.create` is `true` this will be used for the created `ServiceAccount` name, if set and `serviceAccount.create` is `false` then this will define an existing `ServiceAccount` to use.
+  name:
+  # -- If `true`, mount the `ServiceAccount` token.
+  automountToken: false
+
+service:
+  # -- Service type.
+  type: ClusterIP
+  # -- Service annotations.
+  annotations: {}
+  # -- Default port.
+  port: 8081
+  # -- Additional ports to expose.
+  # @default -- See _values.yaml_
+  additionalPorts: []
+  #   - port: 8082
+  #     name: docker-group
+  #     containerPort: 8082
+  #     hosts:
+  #       - nexus-docker.local
+  #   - port: 8083
+  #     name: docker-hosted
+  #     containerPort: 8083
+  #     hosts:
+  #       - nexus-docker-hosted-1.local
+  #       - nexus-docker-hosted-2.local
+
+ingress:
+  # -- If `true`, create an `Ingress` resource.
+  enabled: false
+  # -- Ingress annotations.
+  annotations: {}
+  # -- (string) Ingress class name.
+  ingressClassName:
+  # -- (list) Ingress hosts, do not include hosts defined in `service.additionalPorts`.
+  # @default -- See _values.yaml_
+  hosts: []
+  #   - nexus.local
+  # -- (list) Ingress TLS, hosts defined in both `ingress.hosts` & `service.additionalPorts[*].hosts` should be covered.
+  # @default -- See _values.yaml_
+  tls: []
+  #   - hosts:
+  #       - nexus.local
+  #       - nexus-docker.local
+  #       - nexus-docker-hosted-1.local
+  #       - nexus-docker-hosted-2.local
+  #     secretName: nexus-local-tls
+
+httpRoute:
+  # -- If `true`, create `HTTPRoute` resources.
+  enabled: false
+  # -- Annotations to add to the `HTTPRoute` resources.
+  annotations: {}
+  # -- Labels to add to the `HTTPRoute` resources.
+  labels: {}
+  # -- (list) `HTTPRoute` parent references.
+  # @default -- See _values.yaml_
+  parentRefs: []
+  #   - name: gateway
+  #     namespace: gateway
+  # -- (list) `HTTPRoute` hostnames; do not include hosts defined in `service.additionalPorts` as they will be added automatically.
+  # @default -- See _values.yaml_
+  hostnames: []
+  #   - nexus.local
+  # -- (list) `HTTPRoute` rules for the primary hostname; if not set, a default rule routing all traffic to the HTTP service port will be created.
+  # @default -- See _values.yaml_
+  rules: []
+
+# -- Number of replicas to create; modifying this requires the license to be configured.
+replicas: 1
+
+# -- Update strategy for the `StatefulSet`.
+updateStrategy: {}
+
+# -- Ordinals configuration for the `StatefulSet`.
+ordinals: {}
+
+# -- Pod management policy for the `StatefulSet`.
+podManagementPolicy:
+
+# -- (int) Min ready seconds for the `StatefulSet`.
+minReadySeconds:
+
+podDisruptionBudget:
+  # -- If `true`, create a `PodDisruptionBudget` resource.
+  enabled: false
+  # -- (string) Minimum number of available pods, either a number or a percentage.
+  minAvailable:
+  # -- (string) Minimum number of unavailable pods, either a number or a percentage.
+  maxUnavailable:
+  # -- (string) Unhealthy pod eviction policy for the PDB.
+  unhealthyPodEvictionPolicy:
+
+# -- Labels to add to the pod.
+podLabels: {}
+
+# -- Annotations to add to the pod.
+podAnnotations: {}
+
+# -- (bool) If the service account token should be mounted to the pod, this overrides `serviceAccount.automountToken`.
+automountServiceAccountToken:
+
+# -- Security context for the pod.
+podSecurityContext:
+  runAsNonRoot: false
+  fsGroup: 200
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Security context for non-root init containers.
+initNonRootSecurityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  capabilities:
+    drop:
+      - ALL
+
+# -- Security context for root init container.
+initRootSecurityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+
+# -- (string) Priority class name for the pod.
+priorityClassName:
+
+# -- Termination grace period for the pod in seconds.
+terminationGracePeriodSeconds: 120
+
+# -- Security context for the default container.
+securityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 200
+  runAsGroup: 200
+  capabilities:
+    drop:
+      - ALL
+
+# -- Environment variables for the default container.
+env: []
+
+# -- Startup probe configuration for the default container.
+# @default -- See _values.yaml_
+startupProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 180
+
+# -- Liveness probe configuration for the default container.
+# @default -- See _values.yaml_
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 6
+
+# -- Readiness probe configuration for the default container.
+# @default -- See _values.yaml_
+readinessProbe:
+  httpGet:
+    path: /service/rest/v1/status
+    port: http
+  initialDelaySeconds: 0
+  periodSeconds: 60
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 6
+
+persistence:
+  # -- If `true`, persistence should be enabled for the `StatefulSet`.
+  enabled: false
+  # -- Annotations for the `PersistentVolumeClaim`.
+  annotations: {}
+  # -- Access mode for the `PersistentVolumeClaim`.
+  accessMode: ReadWriteOnce
+  # -- Storage class for the `PersistentVolumeClaim`, if not set the default will be used.
+  storageClass:
+  # -- Size of the `PersistentVolumeClaim`.
+  size: 8Gi
+  # -- If `true`, keep `PersistentVolumeClaims` when the `StatefulSet` is deleted.
+  retainDeleted: true
+  # -- If `true`, keep `PersistentVolumeClaim` when the `StatefulSet` is scaled down.
+  retainScaled: true
+
+# -- Extra volumes for the pod.
+extraVolumes: []
+
+# -- Extra volume mounts for the default container.
+extraVolumeMounts: []
+
+# -- Resources for the default container.
+resources: {}
+# We usually recommend not to specify default resources and to leave this as a conscious
+# choice for the user. This also increases chances charts run on environments with little
+# resources, such as Minikube. If you do want to specify resources, uncomment the following
+# lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+#   limits:
+#     cpu: 100m
+#     memory: 128Mi
+#   requests:
+#     cpu: 100m
+#     memory: 128Mi
+
+# -- Resources for the init containers (not sidecars).
+initResources: {}
+
+# -- Extra init container to run before the default container.
+extraInitContainers: []
+
+# -- Node labels to match for pod scheduling.
+nodeSelector: {}
+
+# -- Affinity settings for pod scheduling. If an explicit label selector is not provided for pod affinity or pod anti-affinity one will be created from the pod selector labels.
+affinity: {}
+
+# -- Topology spread constraints for pod scheduling. If an explicit label selector is not provided one will be created from the pod selector labels.
+topologySpreadConstraints: []
+
+# -- Node taints which will be tolerated for pod scheduling.
+tolerations: []
+
+metrics:
+  # -- If `true`, enable metrics.
+  enabled: false
+  serviceMonitor:
+    # -- If `true`, create a `ServiceMonitor` resource to support the _Prometheus Operator_.
+    enabled: false
+    # -- Additional labels for the `ServiceMonitor`.
+    additionalLabels: {}
+    # -- Additional endpoint configuration for the `ServiceMonitor`.
+    endpointConfig: {}
+
+license:
+  # -- If `true`, use the license in the provided secret. This must be set to enable [Pro features](https://help.sonatype.com/en/repository-manager-pro-features.html).
+  enabled: false
+  # -- (string) Name of the secret containing the license.
+  secret:
+  # -- (string) Key in the secret containing the license.
+  key: nexus.license
+
+# -- _Nexus3_ properties.
+properties: []
+# - nexus.golang.hosted=true
+
+# -- _Nexus3_ store properties.
+storeProperties: []
+
+logback:
+  # -- Maximum history for log files.
+  maxHistory: 30
+
+tailLogs:
+  # -- Resources for the log tailing containers.
+  resources: {}
+
+# -- Env configuration for the _Nexus3_ container.
+install4jAddVmParams: -Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=2048m
+
+caCerts:
+  # -- If `true`, add the CA certificates in the provided secret to the JVM cacerts key store.
+  enabled: false
+  # -- (string) Name of the secret containing the CA certificates.
+  secret:
+
+# -- List of plugins to install.
+plugins: []
+#   - name: nexus-repository-composer
+#     url: https://repo1.maven.org/maven2/org/sonatype/nexus/plugins/nexus-repository-composer/0.0.29/nexus-repository-composer-0.0.29-bundle.kar
+
+# -- If `true`, the _chown-data-dir_ init container will be enabled, this should not be required for most CSI drivers but is left in for backwards compatibility. For new chart installs this should be set to `false`.
+chownDataDir: true
+
+rootPassword:
+  # -- (string) Name of the secret containing the root password.
+  secret:
+  # -- Key in the secret containing the root password.
+  key: password
+
+config:
+  # -- If `true` & `rootPassword.secret` is set, enable the configuration Job.
+  enabled: false
+  job:
+    image:
+      # -- Image repository for the config container.
+      repository: docker.io/alpine/k8s
+      # -- Image tag for config container, this will be omitted if set to `-`.
+      tag: 1.31.2
+      # -- (string) Optional image digest for the config container.
+      digest:
+      # -- Image pull policy for config container.
+      pullPolicy: IfNotPresent
+    # -- The number of seconds to keep the config job after it's finished.
+    ttlSecondsAfterFinished: 600
+    # -- Node labels to match for scheduling the config job.
+    nodeSelector: {}
+    # -- Affinity settings for scheduling the config job.
+    affinity: {}
+    # -- Node taints which will be tolerated for scheduling the config job.
+    tolerations: []
+    # -- Annotations to apply to the config job.
+    annotations: {}
+    # -- Labels to add to the config job pod.
+    podLabels: {}
+    # -- Security context for the pod.
+    podSecurityContext:
+      runAsNonRoot: false
+      fsGroup: 200
+      seccompProfile:
+        type: RuntimeDefault
+    # -- Security context for the config container containers.
+    securityContext:
+      privileged: false
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      capabilities:
+        drop:
+          - ALL
+    # -- Resources for the config container.
+    resources: {}
+
+  anonymous:
+    # -- If `true`, enable anonymous access.
+    enabled: false
+    # -- Roles for anonymous access.
+    roles:
+      - nx-anonymous
+      - nx-metrics
+  realms:
+    # -- If `true`, enable realms.
+    enabled: false
+    # -- List of realms to configure; can be empty or contain any of `NexusAuthenticatingRealm`, `LdapRealm`, `DockerToken`, `NpmToken`, `NuGetApiKey` or `rutauth-realm`.
+    values: []
+    #   - NexusAuthenticatingRealm
+    #   - LdapRealm
+    #   - DockerToken
+    #   - NpmToken
+    #   - NuGetApiKey
+    #   - rutauth-realm
+  # -- If `true`, provision with default blob store configuration.
+  createDefaultBlobStore: true
+  # -- Blob store configuration; based on the REST API (API reference docs require an existing Nexus installation and can be found at **Administration** under _System_ → _API_).
+  blobStores: []
+  # Reference the Nexus Blob store REST API for supported types and expected request body structures of each
+  #   - name: ExampleFileBlobStore
+  #     type: file
+  #     path: /nexus-data/blobs/foo
+  #     softQuota:
+  #       type: spaceRemainingQuota
+  #       limit: 500
+  # - name: ExampleS3BlobStore
+  #   type: s3
+  #   bucketConfiguration:
+  #     bucket:
+  #       region: us-east-1
+  #       name: example-bucket-name
+  #       prefix: /
+  #       expiration: 3
+  #     # bucketSecurity:  # Uncomment if not using Instance Profile
+  #     #   accessKeyId: access-key-id
+  #     #   secretAccessKey:
+  #     #     secret: test-blob
+  #     #     key: secret-access-key
+  # -- Cleanup configuration.
+  cleanup: []
+  #   - name: ExampleCleanup
+  #     notes: "Cleanup content that hasn't been updated in 14 days downloaded in 28 days."
+  #     format: ALL_FORMATS
+  #     mode: delete
+  #     criteria:
+  #       isPrerelease:
+  #       lastBlobUpdated: "1209600"
+  #       lastDownloaded: "2419200"
+  #       regex:
+  repoCredentials:
+    # -- **DEPRECATED** - If `true`, enable repository credentials. Use inline repo password instead.
+    enabled: false
+    # -- (string) Name of the secret containing the repository credentials.
+    secret:
+  # -- Repository configuration; based on the REST API (API reference docs require an existing Nexus installation and can be found at **Administration** under _System_ → _API_) but with `format` & `type` defined in the object.
+  repos: []
+  #   - name: test-repo
+  #     format: raw
+  #     type: hosted
+  #     online: true
+  #     storage:
+  #       blobStoreName: default
+  #       strictContentTypeValidation: false
+  #       writePolicy: allow
+  #     cleanup:
+  #       policyNames:
+  #         - ExampleCleanup
+  #     bearerToken:
+  #       secret: test-repo
+  #       key: bearerToken
+  #     password:
+  #       secret: test-repo
+  #       key: password
+  # -- Privileges configuration; based on the REST API (API reference docs require an existing Nexus installation and can be found at **Administration** under _System_ → _API_).
+  privileges: []
+  #   - type: application
+  #     name: nx-metrics-all
+  #     description: All permissions for Metrics
+  #     readOnly: true
+  #     actions:
+  #       - ALL
+  #     domain: metrics
+  # -- Roles configuration; based on the REST API (API reference docs require an existing Nexus installation and can be found at **Administration** under _System_ → _API_).
+  roles: []
+  #   - id: nexus-administrators
+  #     source: default
+  #     name: nexus-administrators
+  #     description: LDAP Administrator Role
+  #     privileges: []
+  #     roles:
+  #       - nx-admin
+  # -- Users configuration; based on the REST API (API reference docs require an existing Nexus installation and can be found at **Administration** under _System_ → _API_).
+  users: []
+  #   - userId: test
+  #     firstName: Test
+  #     lastName: User
+  #     emailAddress: test@example.org
+  #     source: default
+  #     status: active
+  #     roles:
+  #       - nx-anonymous
+  #     externalRoles: []
+  #     password:
+  #       secret: test-user
+  #       key: password
+  # -- LDAP configuration; based on the REST API (API reference docs require an existing Nexus installation and can be found at **Administration** under _System_ → _API_).
+  ldap:
+    enabled: false
+    name:
+    protocol: ldaps
+    useTrustStore: true
+    connectionTimeoutSeconds: 30
+    connectionRetryDelaySeconds: 300
+    maxIncidentsCount: 3
+    host:
+    port: 636
+    authScheme: simple
+    authUsername:
+    authPassword:
+      secret:
+      key:
+    authRealm:
+    searchBase:
+    userBaseDn:
+    userSubtree: false
+    userObjectClass: user
+    userLdapFilter:
+    userIdAttribute: sAMAccountName
+    userRealNameAttribute: cn
+    userEmailAddressAttribute: email
+    userPasswordAttribute:
+    ldapGroupsAsRoles: false
+    groupType: dynamic
+    userMemberOfAttribute: memberOf
+    groupBaseDn:
+    groupSubtree: false
+    groupObjectClass:
+    groupIdAttribute:
+    groupMemberAttribute:
+    groupMemberFormat:
+  # -- Task configuration.
+  tasks: []
+  #   - name: "Cleanup service"
+  #     typeId: repository.cleanup
+  #     crontab: "0 0 0 * * ?"
+  #   - name: "Docker cleanup uploads"
+  #     typeId: repository.docker.upload-purge
+  #     crontab: "0 0 0 * * ?"
+  #     attributes:
+  #       age: "24"
+  #   - name: "Docker cleanup artifacts"
+  #     typeId: repository.docker.gc
+  #     crontab: "0 0 1 * * ?"
+  #     attributes:
+  #       repositoryName: "*"
+  #   - name: "Cleanup blob store"
+  #     typeId: blobstore.compact
+  #     crontab: "0 0 2 * * ?"
+  #     attributes:
+  #       blobstoreName: "default"
+
+manualMaintenanceMode:
+  # -- If `true`, enable manual maintenance mode. This is running the default container with a custom command, reducing the termination grace period to 10s and disabling the probes.
+  enabled: false
+  # -- The command to run in manual maintenance mode.
+  command: ["/bin/bash", "-c"]
+  # -- The arguments to pass to the command in manual maintenance mode.
+  args: ["while true; do sleep 60; done"]
+
+# @ignored
+testResources: false

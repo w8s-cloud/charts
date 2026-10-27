@@ -1,0 +1,17 @@
+artifacthub: groundhog2k/postgres
+name: PostgreSQL
+tagline: One PostgreSQL server, with its data on a volume.
+description: |
+  The relational database most things expect. One server, its data on a
+  10 GiB volume, nothing clustered and no operator. Other clusters in the
+  organisation can reach it by name once you export its Service - which is
+  how an app on one site talks to a database on another.
+tags: [SQL, Relational, Postgres]
+category: db
+git: {repo: groundhog2k/helm-charts, path: charts/postgres, ref: postgres-1.6.8}
+chart:
+  url: https://github.com/groundhog2k/helm-charts/releases/download/postgres-1.6.8/postgres-1.6.8.tgz
+  version: 1.6.8
+source: https://www.postgresql.org
+logo: https://raw.githubusercontent.com/docker-library/docs/master/postgres/logo.png
+values: {storage: {requestedSize: 10Gi}}

@@ -1,0 +1,22 @@
+artifacthub: pascaliske/vikunja
+name: Vikunja
+tagline: Tasks and projects as lists, kanban boards, Gantt charts or tables.
+description: |
+  A to-do and project tool for one person or a team: projects, labels,
+  due dates, assignees, and four views of the same tasks. Its SQLite
+  database and attachments live on a 5 GiB volume.
+  Community-maintained chart.
+tags: [Tasks, Kanban, Projects]
+category: project
+git: {repo: pascaliske/helm-charts, path: charts/vikunja, ref: a06c1a9fe2d92c721ee5edd0624db9016da21317}
+chart:
+  url: https://github.com/pascaliske/helm-charts/releases/download/vikunja-5.1.0/vikunja-5.1.0.tgz
+  version: 5.1.0
+source: https://vikunja.io
+logo: https://raw.githubusercontent.com/go-vikunja/vikunja/04373954353c22b78f552044ad551e1407a92f24/frontend/originalMedia/images/logo.svg
+values:
+  env:
+    - {name: TZ, value: UTC}
+    # The image puts its SQLite file beside the binary, off the volume.
+    - {name: VIKUNJA_DATABASE_PATH, value: /app/vikunja/files/vikunja.db}
+  persistentVolumeClaim: {size: 5Gi}

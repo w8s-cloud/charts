@@ -1,0 +1,17 @@
+artifacthub: gabe565/changedetection-io
+name: changedetection.io
+tagline: Watches web pages and tells you what changed.
+description: |
+  Point it at a page, choose how often to look and what part to compare,
+  and it tells you when that part changes - a price, a status page, a
+  tender list. Its watches and their history live on a 2 GiB volume.
+tags: [Monitoring, Web, Alerts]
+category: observability
+git: {repo: gabe565/charts, path: charts/changedetection-io, ref: changedetection-io-0.12.0}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/changedetection-io-0.12.0/changedetection-io-0.12.0.tgz
+  version: 0.12.0
+source: https://changedetection.io
+logo: https://raw.githubusercontent.com/gabe565/charts/main/charts/changedetection-io/icon.png
+values:
+  persistence: {datastore: {enabled: true, accessMode: ReadWriteOnce, size: 2Gi}}

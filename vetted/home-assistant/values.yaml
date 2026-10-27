@@ -1,0 +1,98 @@
+#
+# IMPORTANT NOTE
+#
+# This chart inherits from our common library chart. You can check the default values/options here:
+# https://github.com/bjw-s/helm-charts/blob/a081de5/charts/library/common/values.yaml
+#
+
+image:
+  # -- image repository
+  repository: ghcr.io/home-assistant/home-assistant
+  # -- image pull policy
+  pullPolicy: IfNotPresent
+  # -- image tag
+  tag: latest
+
+# -- environment variables.
+# @default -- See [values.yaml](./values.yaml)
+env:
+  # -- Set the container timezone
+  TZ: UTC
+
+# -- Configures service settings for the chart.
+# @default -- See [values.yaml](./values.yaml)
+service:
+  main:
+    ports:
+      http:
+        port: 8123
+
+ingress:
+  # -- Enable and configure ingress settings for the chart under this key.
+  # @default -- See [values.yaml](./values.yaml)
+  main:
+    enabled: false
+    # hosts:
+    #   - host: chart-example.local
+    #     paths:
+    #       - path: /
+    # tls:
+    #   - secretName: chart-example.local-tls
+    #     hosts:
+    #       - chart-example.local
+
+# -- Enable devices to be discoverable
+hostNetwork: false
+
+# -- When hostNetwork is true set dnsPolicy to `ClusterFirstWithHostNet`
+dnsPolicy: ClusterFirst
+
+persistence:
+  # -- Configure persistence settings for the chart under this key.
+  # @default -- See [values.yaml](./values.yaml)
+  config:
+    enabled: false
+    retain: true
+    # storageClass: ""
+    # accessMode: ReadWriteOnce
+    # size: 1Gi
+
+# -- Enable and configure postgresql database subchart under this key.
+#    For more options see [postgresql chart documentation](https://github.com/bitnami/charts/tree/master/bitnami/postgresql)
+# @default -- See [values.yaml](./values.yaml)
+postgresql:
+  enabled: false
+  auth:
+    database: home-assistant
+    postgresPassword: changeme
+  primary:
+    persistence:
+      enabled: false
+      # storageClass: ""
+      # size: 8Gi
+
+addons:
+  codeserver:
+    # -- Enable VS Code server addon.
+    #    This allows for easy access to configuration.yaml
+    enabled: false
+    # -- Enable and configure ingress settings for the VS Code server under this key.
+    # @default -- See [values.yaml](./values.yaml)
+    ingress:
+      enabled: false
+      # hosts:
+      #   - host: code.example.com
+      #     paths:
+      #       - path: /
+      # tls:
+      #   - secretName: code.example.com-tls
+      #     hosts:
+      #       - code.example.com
+    # @ignored
+    args:
+      - --auth=none
+      - --user-data-dir=/data/config/.vscode
+    # @ignored
+    volumeMounts:
+      - name: config
+        mountPath: /data/config

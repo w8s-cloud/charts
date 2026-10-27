@@ -1,0 +1,15 @@
+artifacthub: qdrant/qdrant
+name: Qdrant
+tagline: A vector database for similarity search and retrieval-augmented generation.
+description: |
+  Store embeddings with their payloads and search them by similarity,
+  with filters. The usual store behind RAG and recommendation. One node
+  with its data on a persistent volume.
+tags: [Vector database, RAG, Embeddings]
+category: ai
+git: {repo: qdrant/qdrant-helm, path: charts/qdrant, ref: af3983dbe3fbf0db2115f8fd1c5f60a692cfe822}
+chart:
+  url: https://github.com/qdrant/qdrant-helm/releases/download/qdrant-1.19.1/qdrant-1.19.1.tgz
+  version: 1.19.1
+source: https://qdrant.tech
+logo: https://raw.githubusercontent.com/qdrant/qdrant/6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de/docs/logo.svg

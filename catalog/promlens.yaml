@@ -1,0 +1,15 @@
+artifacthub: christianhuth/promlens
+name: PromLens
+tagline: Builds and explains PromQL queries, against any Prometheus API.
+description: |
+  PromLens takes a PromQL query apart and shows what each piece selects and
+  how much it costs, which is how you learn the language rather than
+  guessing at it. Point it at the metrics store you already run - the
+  VictoriaMetrics entry in this catalog serves the same API. Stateless.
+tags: [PromQL, Metrics, Queries]
+category: observability
+git: {repo: christianhuth/helm-charts, path: charts/promlens, ref: promlens-1.6.0}
+chart:
+  url: https://github.com/christianhuth/helm-charts/releases/download/promlens-1.6.0/promlens-1.6.0.tgz
+  version: 1.6.0
+source: https://github.com/prometheus/promlens

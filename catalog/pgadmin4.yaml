@@ -1,0 +1,22 @@
+artifacthub: runix/pgadmin4
+name: pgAdmin 4
+tagline: The web console for PostgreSQL, next to the databases it manages.
+description: |
+  pgAdmin is PostgreSQL's own administration tool: browse schemas, run
+  queries, read plans, manage roles. Its own settings and saved queries
+  live on a 2 GiB volume. It connects out to any Postgres it can reach,
+  including one another cluster in the organisation exported.
+tags: [PostgreSQL, Admin UI, SQL]
+category: db
+git: {repo: rowanruseler/helm-charts, path: charts/pgadmin4, ref: pgadmin4-1.70.4}
+chart:
+  url: https://github.com/rowanruseler/helm-charts/releases/download/pgadmin4-1.70.4/pgadmin4-1.70.4.tgz
+  version: 1.70.4
+source: https://www.pgadmin.org
+logo: https://raw.githubusercontent.com/pgadmin-org/pgadmin4/master/web/pgadmin/static/img/logo-right-128.png
+# test.enabled off: the chart's connection test is a Pod, which an app
+# deployment may not create (it is a Helm test hook, never installed, but
+# the catalog's own check reads what the chart renders).
+values:
+  persistentVolume: {enabled: true, size: 2Gi}
+  test: {enabled: false}
