@@ -1,0 +1,106 @@
+#
+# IMPORTANT NOTE
+#
+# This chart inherits from our common library chart. You can check the default values/options here:
+# https://github.com/bjw-s/helm-charts/blob/a081de5/charts/library/common/values.yaml
+#
+
+image:
+  # -- image repository
+  repository: ghcr.io/borgmatic-collective/borgmatic
+  # -- image pull policy
+  pullPolicy: IfNotPresent
+  # -- image tag
+  tag: 1.9.9
+
+controller:
+  # -- Set the controller type. Valid options are `deployment` or `cronjob`.
+  type: deployment
+  cronjob:
+    # -- Only used when `controller.type: cronjob`. Sets the backup CronJob time.
+    schedule: 0 * * * *
+    # -- Only used when `controller.type: cronjob`. Sets the CronJob backoffLimit.
+    backoffLimit: 0
+
+# -- environment variables. [[ref]](https://borgbackup.readthedocs.io/en/stable/usage/general.html#environment-variables)
+# @default -- See [values.yaml](./values.yaml)
+env:
+  # -- Borg host ID used in archive names
+  # @default -- Deployment namespace
+  BORG_HOST_ID: ""
+  # BORG_PASSPHRASE:
+  # PGPASSWORD:
+  # MYSQL_PWD:
+  # MONGODB_PASSWORD:
+
+persistence:
+  # -- Configure persistence settings for the chart under this key.
+  # @default -- See [values.yaml](./values.yaml)
+  data:
+    enabled: false
+    retain: true
+    # storageClass: ""
+    # accessMode: ReadWriteOnce
+    # size: 1Gi
+    subPath:
+      - path: borg-repository
+        mountPath: /mnt/borg-repository
+      - path: config
+        mountPath: /root/.config/borg
+      - path: cache
+        mountPath: /root/.cache/borg
+  # -- Configure SSH credentials for the chart under this key.
+  # @default -- See [values.yaml](./values.yaml)
+  ssh:
+    enabled: false
+    mountPath: /root/.ssh
+    defaultMode: 0600
+
+configMaps:
+  # -- Configure Borgmatic container under this key.
+  # @default -- See [values.yaml](./values.yaml)
+  config:
+    enabled: true
+    data:
+      # -- Crontab
+      crontab.txt: |-
+        0 1 * * * PATH=$PATH:/usr/bin /usr/local/bin/borgmatic --stats -v 0 2>&1
+      # -- Borgmatic config. [[ref]](https://torsion.org/borgmatic/docs/reference/configuration)
+      # @default -- See [values.yaml](./values.yaml)
+      config.yaml: |
+        location:
+          # List of source directories to backup.
+          source_directories:
+            - /home
+            - /etc
+
+          # Paths of local or remote repositories to backup to.
+          repositories:
+            - 1234@usw-s001.rsync.net:backups.borg
+            - k8pDxu32@k8pDxu32.repo.borgbase.com:repo
+            - /var/lib/backups/local.borg
+
+        retention:
+          # Retention policy for how many backups to keep.
+          keep_daily: 7
+          keep_weekly: 4
+          keep_monthly: 6
+
+        consistency:
+          # List of checks to run to validate your backups.
+          checks:
+            - name: repository
+            - name: archives
+              frequency: 2 weeks
+
+        hooks:
+          # Custom preparation scripts to run.
+          before_backup:
+            - prepare-for-backup.sh
+
+          # Databases to dump and include in backups.
+          postgresql_databases:
+            - name: users
+
+          # Third-party services to notify you if backups aren't happening.
+          healthchecks: https://hc-ping.com/be067061-cf96-4412-8eae-62b0c50d6a8c

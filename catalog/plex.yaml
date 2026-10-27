@@ -1,0 +1,18 @@
+artifacthub: gabe565/plex
+name: Plex Media Server
+tagline: Serves a library of video and music to Plex's own clients.
+description: |
+  Plex indexes a media library and streams it to the apps on televisions,
+  phones and browsers, transcoding where a client needs it. Its database and
+  metadata live on a 20 GiB volume; the media itself belongs on storage you
+  mount beside it. The server is free software to run, but it is not open
+  source and it signs in to plex.tv.
+tags: [Media, Video, Streaming]
+category: web
+git: {repo: gabe565/charts, path: charts/plex, ref: plex-0.5.1}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/plex-0.5.1/plex-0.5.1.tgz
+  version: 0.5.1
+source: https://www.plex.tv
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 20Gi}}

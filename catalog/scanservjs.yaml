@@ -1,0 +1,17 @@
+artifacthub: gabe565/scanservjs
+name: scanservjs
+tagline: Shares a USB scanner over the network, through a browser.
+description: |
+  A scanner plugged into one machine at a site becomes something anybody
+  there can use from a browser: preview, scan, crop, and save as PDF or
+  image. Its settings live on a 1 GiB volume. The scanner itself has to be
+  reachable from the node this runs on.
+tags: [Scanning, SANE, Documents]
+category: other
+git: {repo: gabe565/charts, path: charts/scanservjs, ref: scanservjs-0.9.2}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/scanservjs-0.9.2/scanservjs-0.9.2.tgz
+  version: 0.9.2
+source: https://github.com/sbs20/scanservjs
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 1Gi}}

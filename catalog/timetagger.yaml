@@ -1,0 +1,16 @@
+artifacthub: christianhuth/timetagger
+name: TimeTagger
+tagline: Tracks time against tags, with an interactive timeline.
+description: |
+  Start and stop a timer, tag the record, and read the week back on a
+  timeline you can drag. Meant for one person or a small team keeping their
+  own hours rather than for a payroll department. Records live on a 2 GiB
+  volume.
+tags: [Time tracking, Timeline]
+category: other
+git: {repo: christianhuth/helm-charts, path: charts/timetagger, ref: timetagger-2.2.0}
+chart:
+  url: https://github.com/christianhuth/helm-charts/releases/download/timetagger-2.2.0/timetagger-2.2.0.tgz
+  version: 2.2.0
+source: https://timetagger.app
+values: {persistence: {enabled: true, size: 2Gi}}

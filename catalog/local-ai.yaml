@@ -1,0 +1,15 @@
+artifacthub: localai/local-ai
+name: LocalAI
+tagline: A drop-in, self-hosted replacement for the OpenAI API, for text, images and audio.
+description: |
+  LocalAI serves open models for chat, embeddings, image generation and
+  speech behind the OpenAI API shape, so existing clients only change
+  their base URL. Runs on CPU; GPUs when the values ask for them.
+tags: [LLM, Inference, OpenAI-compatible]
+category: ai
+git: {repo: go-skynet/helm-charts, path: charts/local-ai, ref: 34835a5c5c025f4651178e2095f608e2fb2b4a53}
+chart:
+  url: https://github.com/go-skynet/helm-charts/releases/download/local-ai-3.4.2/local-ai-3.4.2.tgz
+  version: 3.4.2
+source: https://localai.io
+logo: https://raw.githubusercontent.com/mudler/LocalAI/eb97d5f5493493de02cdc64118895ba1ab3c8688/docs/static/favicon.svg

@@ -1,0 +1,356 @@
+## Default values for Ghost deployment
+
+## Ghost docker image
+image:
+  registry: "docker.io"
+  repository: "ghost"
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+## Additional labels for Deployment or StatefulSet
+customLabels: {}
+
+## Additional annotations for Deployment or StatefulSet
+customAnnotations: {}
+
+## Pod deployment strategy
+strategy: {}
+
+## Optional service account
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+## Additional pod labels
+podLabels: {}
+
+## Pod security options (default: ghost as fsGroup)
+podSecurityContext:
+  fsGroup: 1000
+
+## Default security options to run Ghost as read only container without privilege escalation
+securityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsGroup: 1000
+  runAsUser: 1000
+
+## Default Ghost service port (default web service port)
+service:
+  type: ClusterIP
+  port: 80
+  ## The node port (only relevant for type LoadBalancer or NodePort)
+  nodePort:
+  ## The cluster ip address (only relevant for type LoadBalancer or NodePort)
+  clusterIP:
+  ## The loadbalancer ip address (only relevant for type LoadBalancer)
+  loadBalancerIP:
+  ## The list of IP CIDR ranges that are allowed to access the load balancer (only relevent for type LoadBalancer)
+  loadBalancerSourceRanges: []
+  ## Annotations to add to the service
+  annotations: {}
+  ## Labels to add to the service
+  labels: {}
+
+## Ingress configuration
+ingress:
+  ## Enable ingress endpoint
+  enabled: false
+
+  ## Optional ingress class name
+  className:
+
+  ## Maximal body size (default: 2m - increase if uploads failing)
+  maxBodySize: 2m
+
+  ## Additional ingress annotations
+  annotations: {}
+   # kubernetes.io/ingress.class: nginx
+   # kubernetes.io/tls-acme: "true"
+
+  ## Additional ingress labels
+  labels: {}
+
+  ## Hosts
+  hosts:
+    - host:
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+  ## TLS settings for hosts
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+## HTTPRoute configuration for Gateway API
+httpRoute:
+  enabled: false
+
+  ## Additional HTTPRoute annotations
+  annotations: {}
+
+  ## Additional HTTPRoute labels
+  labels: {}
+
+  ## Gateway parent references (required when httpRoute.enabled is true and listenerSet.enabled is false)
+  parentRefs: []
+    # - name: gateway
+    #   namespace: default
+    #   sectionName: https
+
+  ## Hostnames for the HTTPRoute
+  hostnames: []
+    # - ghost.example.local
+
+  ## Rules for routing traffic to the Management UI service
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters: []
+      timeouts: {}
+
+## ListenerSet configuration for Gateway API
+listenerSet:
+  enabled: false
+
+  ## Additional ListenerSet annotations
+  annotations: {}
+
+  ## Additional ListenerSet labels
+  labels: {}
+
+  ## Gateway parent reference (required when listenerSet.enabled is true)
+  parentRef: {}
+    # name: gateway
+    # namespace: default
+
+  ## Listeners to attach to the parent Gateway
+  listeners: []
+    # - name: https
+    #   port: 443
+    #   protocol: HTTPS
+    #   hostname: ghost.example.local
+    #   allowedRoutes:
+    #     namespaces:
+    #       from: Same
+    #   tls:
+    #     mode: Terminate
+    #     certificateRefs:
+    #       - kind: Secret
+    #         name: ghost-https-cert
+
+## Resource limits and requests
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+## Pod priority class name
+priorityClassName: ""
+
+## Additional node selector
+nodeSelector: {}
+
+## Tolerations for pod assignment
+tolerations: []
+
+## Affinity for pod assignment
+affinity: {}
+
+## Topology spread constraints for pods
+topologySpreadConstraints: {}
+
+## Maximum number of revisions maintained in revision history
+revisionHistoryLimit:
+
+## Custom startup probe (overwrites default startup probe)
+customStartupProbe: {}
+
+## Default startup probe
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+  successThreshold: 1
+  periodSeconds: 10
+
+## Custom liveness probe (overwrites default liveness probe)
+customLivenessProbe: {}
+
+## Default liveness probe
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+  periodSeconds: 10
+
+## Custom readiness probe (overwrites default readiness probe)
+customReadinessProbe: {}
+
+## Default readiness probe
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+  periodSeconds: 10
+
+## Additional environment variables
+env: []
+
+## Arguments for the container entrypoint process
+args: []
+
+externalDatabase:
+  ## Type of database ("mysql" or "mariadb" - default: sqlite)
+  type: sqlite
+
+  ## Path to default SQLite database (only sqlite)
+  sqliteDatabaseFile: "content/data/ghost.db"
+
+  ## Name of the database (default: ghost)
+  name: ghost
+
+  ## Database user (only mysql/mariadb)
+  user:
+
+  ## Database password (only mysql/mariadb)
+  password:
+
+  ## Database host (only for mysql/mariadb)
+  host:
+
+  ## Database port (only for mysql/mariadb)
+  port:
+
+## Ghost specific configuration
+settings:
+  ## Default URL (for generated links)
+  url:
+
+  ## Log to stdout only (default) - otherwise logging will go to stdout and file
+  logToStdout: true
+
+  ## Environment mode (development or production - default: production)
+  mode: production
+
+  ## SMTP connection details
+  mail:
+    from:
+    transport: SMTP
+    host:
+    port:
+    service:
+    user:
+    password:
+
+## Storage parameters
+storage:
+  ##  Set persistentVolumenClaimName to reference an existing PVC
+  persistentVolumeClaimName:
+
+  ## Alternative set requestedSize to define a size for a dynmaically created PVC
+  requestedSize:
+
+  ## the storage class name
+  className:
+
+  ## Default access mode (ReadWriteOnce)
+  accessModes:
+    - ReadWriteOnce
+
+  ## Keep a created Persistent volume claim when uninstalling the helm chart
+  keepPvc: false
+
+  ## Additional storage annotations
+  annotations: {}
+
+  ## Additional storage labels
+  labels: {}
+
+
+## MariaDB configuration
+mariadb:
+  ## Enable MariaDB helm chart for deployment (default: false)
+  enabled: false
+
+  ## Database settings
+  settings:
+    ## The root user password
+    rootPassword:
+
+  ## Optional user database which is created during first startup with user and password
+  userDatabase: {}
+    ## Name of the user database
+    # name:
+    ## Database user with full access rights
+    # user:
+    ## Password of the database user
+    # password:
+
+## MySQL configuration
+mysql:
+  ## Enable MySQL helm chart for deployment (default: false)
+  enabled: false
+
+  ## Database settings
+  settings:
+    ## The root user password
+    rootPassword:
+
+  ## Optional user database which is created during first startup with user and password
+  userDatabase: {}
+    ## Name of the user database
+    # name:
+    ## Database user with full access rights
+    # user:
+    ## Password of the database user
+    # password:
+
+  # Storage parameters
+  storage:
+    ## Set persistentVolumenClaimName to reference an existing PVC
+    persistentVolumeClaimName:
+
+    ## Alternative set requestedSize to define a size for a dynmaically created PVC
+    requestedSize:
+
+    ## the storage class name
+    className:
+
+    ## Additional storage annotations
+    annotations: {}
+
+    ## Additional storage labels
+    labels: {}
+
+## Network policies
+networkPolicy: {}
+  ## Ingress and Egress policies
+  # ingress: {}
+  # egress: {}

@@ -1,0 +1,15 @@
+artifacthub: christianhuth/freshrss
+name: FreshRSS
+tagline: A feed reader for the web you choose to follow.
+description: |
+  FreshRSS pulls the feeds you subscribe to, keeps what you have read and
+  serves it to a browser or to any client speaking the Google Reader or
+  Fever API. Its database and cache are on volumes the chart creates
+  (SQLite by default).
+tags: [RSS, Feeds, Reader]
+category: web
+git: {repo: christianhuth/helm-charts, path: charts/freshrss, ref: freshrss-2.18.4}
+chart:
+  url: https://github.com/christianhuth/helm-charts/releases/download/freshrss-2.18.4/freshrss-2.18.4.tgz
+  version: 2.18.4
+source: https://freshrss.org

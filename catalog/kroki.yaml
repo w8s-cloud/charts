@@ -1,0 +1,16 @@
+artifacthub: cowboysysop/kroki
+name: Kroki
+tagline: Diagrams from text - Mermaid, PlantUML, Graphviz, BPMN and more - over one API.
+description: |
+  Send diagram source, get back SVG or PNG. One endpoint renders more than
+  twenty diagram languages, so docs, wikis and CI can draw architecture
+  diagrams from text kept next to the code. Stateless.
+  Community-maintained chart.
+tags: [Diagrams, Mermaid, Documentation]
+category: devtools
+git: {repo: cowboysysop/charts, path: charts/kroki, ref: 2a3f0ba406ba473d4e4465526fada70ca728a7f3}
+chart:
+  url: https://github.com/cowboysysop/charts/releases/download/kroki-6.1.0/kroki-6.1.0.tgz
+  version: 6.1.0
+source: https://kroki.io
+logo: https://raw.githubusercontent.com/yuzutech/kroki/7cc38976dc133f8030ce8f2298ac959727b92be5/server/src/main/resources/web/root/assets/logo.svg

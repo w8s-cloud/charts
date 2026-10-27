@@ -1,0 +1,18 @@
+artifacthub: groundhog2k/ghost
+name: Ghost
+tagline: A publishing platform for a blog, a newsletter or paid memberships.
+description: |
+  Write posts, send them as newsletters, and take paid subscriptions, on
+  your own domain. Comes with its own MariaDB (the official image); the
+  content directory is on a 5 GiB volume. Community-maintained chart.
+tags: [Blog, Newsletter, Publishing]
+category: knowledge
+git: {repo: groundhog2k/helm-charts, path: charts/ghost, ref: 55d4138979d41a9266c317fee6629a28b5ed6f31}
+chart:
+  url: https://github.com/groundhog2k/helm-charts/releases/download/ghost-0.212.15/ghost-0.212.15.tgz
+  version: 0.212.15
+source: https://ghost.org
+logo: https://raw.githubusercontent.com/TryGhost/Ghost/6d96868eef86f991c1622c328d9ccbc228bff176/apps/ember-admin/public/assets/icons/ghost-logo-orb.svg
+values:
+  mariadb: {enabled: true}
+  storage: {requestedSize: 5Gi}

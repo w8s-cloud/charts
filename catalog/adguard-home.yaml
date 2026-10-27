@@ -1,0 +1,17 @@
+artifacthub: gabe565/adguard-home
+name: AdGuard Home
+tagline: A DNS server for the whole network that drops ads and trackers.
+description: |
+  Point a site's DNS at AdGuard Home and every device behind it stops
+  resolving the hosts on its block lists - no client software anywhere. It
+  also serves as that site's resolver, with its own rules and query log, on
+  a 2 GiB volume.
+tags: [DNS, Ad blocking, Privacy]
+category: security
+git: {repo: gabe565/charts, path: charts/adguard-home, ref: adguard-home-0.3.25}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/adguard-home-0.3.25/adguard-home-0.3.25.tgz
+  version: 0.3.25
+source: https://github.com/AdguardTeam/AdGuardHome
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 2Gi}}

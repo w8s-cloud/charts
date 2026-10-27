@@ -1,0 +1,16 @@
+artifacthub: twin/gatus
+name: Gatus
+tagline: Health checks and a status page, declared in one YAML file.
+description: |
+  Gatus probes your endpoints on an interval, checks the answer against
+  conditions you write (status, body, latency, certificate expiry) and
+  shows the result on a status page. Configuration as code, no database
+  needed.
+tags: [Uptime, Status page, Health checks]
+category: observability
+git: {repo: TwiN/helm-charts, path: charts/gatus, ref: 1eca33b024cb941cef5e0ad1c36823c5b170782b}
+chart:
+  url: https://github.com/TwiN/helm-charts/releases/download/gatus-1.5.0/gatus-1.5.0.tgz
+  version: 1.5.0
+source: https://gatus.io
+logo: https://raw.githubusercontent.com/TwiN/gatus/ae605f291928ed9b3bdbe60ae5528cc57631433b/.github/assets/logo.svg

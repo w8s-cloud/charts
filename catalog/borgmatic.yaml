@@ -1,0 +1,17 @@
+artifacthub: gabe565/borgmatic
+name: borgmatic
+tagline: Scheduled, deduplicating backups with Borg, driven by one config file.
+description: |
+  borgmatic wraps BorgBackup: you describe what to back up and where to send
+  it, and it runs the archives, prunes the old ones and checks the
+  repository on a schedule. Its own state and repository live on a 20 GiB
+  volume; point it at off-site storage for anything you would miss.
+tags: [Backup, Borg, Scheduled]
+category: storage
+git: {repo: gabe565/charts, path: charts/borgmatic, ref: borgmatic-0.10.1}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/borgmatic-0.10.1/borgmatic-0.10.1.tgz
+  version: 0.10.1
+source: https://torsion.org/borgmatic/
+values:
+  persistence: {data: {enabled: true, accessMode: ReadWriteOnce, size: 20Gi}}

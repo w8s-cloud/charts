@@ -1,0 +1,15 @@
+artifacthub: pascaliske/linkding
+name: linkding
+tagline: A fast, minimal bookmark manager for a person or a team.
+description: |
+  Save links with tags and notes, search them, share them, and archive
+  snapshots of the pages. Browser extensions for Firefox and Chrome. Its
+  SQLite database lives on a volume. Community-maintained chart.
+tags: [Bookmarks, Links, Reading]
+category: productivity
+git: {repo: pascaliske/helm-charts, path: charts/linkding, ref: 43860e0701340db1d6edfedd811e611749eab634}
+chart:
+  url: https://github.com/pascaliske/helm-charts/releases/download/linkding-3.0.0/linkding-3.0.0.tgz
+  version: 3.0.0
+source: https://linkding.link
+logo: https://raw.githubusercontent.com/sissbruecker/linkding/27b7303baf41bb28babc610ac8eaa486e1ddfab5/bookmarks/static/logo.svg

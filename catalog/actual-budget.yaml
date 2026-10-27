@@ -1,0 +1,17 @@
+artifacthub: community-charts/actualbudget
+name: Actual Budget
+tagline: Envelope budgeting for a household or a small business, with sync across devices.
+description: |
+  A local-first budgeting app: plan every euro of income into categories,
+  import bank exports, and keep the books on your own server. The sync
+  server keeps its files on a 2 GiB volume. Community-maintained chart.
+tags: [Finance, Budgeting, Accounting]
+category: business
+git: {repo: community-charts/helm-charts, path: charts/actualbudget, ref: 3be132b6bed0edc06f813d311e3a7c123d346dcc}
+chart:
+  url: https://github.com/community-charts/helm-charts/releases/download/actualbudget-1.9.5/actualbudget-1.9.5.tgz
+  version: 1.9.5
+source: https://actualbudget.org
+logo: https://raw.githubusercontent.com/actualbudget/docs/8ad6e1440cb9ff78926f708cdd14d17a62a13792/static/img/logo.svg
+values:
+  persistence: {enabled: true, size: 2Gi}

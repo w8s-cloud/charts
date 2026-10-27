@@ -1,0 +1,21 @@
+artifacthub: nextcloud/nextcloud
+name: Nextcloud
+tagline: Files, calendars and contacts on a server of your own.
+description: |
+  Nextcloud is the self-hosted end of file sync and share: desktop and
+  mobile clients, shared folders and links, calendars and contacts over
+  the open protocols. This installs one server with its files and its
+  built-in SQLite database on a 20 GiB volume - point it at Postgres
+  instead once more than a handful of people use it.
+tags: [Files, Sync, Calendar]
+category: web
+git: {repo: nextcloud/helm, path: charts/nextcloud, ref: nextcloud-9.4.0}
+chart:
+  url: https://github.com/nextcloud/helm/releases/download/nextcloud-9.4.0/nextcloud-9.4.0.tgz
+  version: 9.4.0
+source: https://nextcloud.com
+logo: https://raw.githubusercontent.com/nextcloud/server/master/core/img/logo/logo.svg
+logo_background: "#ffffff"
+values:
+  persistence: {enabled: true, size: 20Gi}
+  internalDatabase: {enabled: true}

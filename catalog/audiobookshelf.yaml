@@ -1,0 +1,14 @@
+artifacthub: christianhuth/audiobookshelf
+name: Audiobookshelf
+tagline: An audiobook and podcast server that remembers where you stopped.
+description: |
+  Point it at a library of audiobooks or podcasts and it serves them to its
+  own apps and to any browser, keeping each listener's position. The chart
+  creates volumes for the library, its metadata and its backups.
+tags: [Audiobooks, Podcasts, Media]
+category: web
+git: {repo: christianhuth/helm-charts, path: charts/audiobookshelf, ref: audiobookshelf-2.5.1}
+chart:
+  url: https://github.com/christianhuth/helm-charts/releases/download/audiobookshelf-2.5.1/audiobookshelf-2.5.1.tgz
+  version: 2.5.1
+source: https://www.audiobookshelf.org

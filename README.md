@@ -14,6 +14,14 @@ Connect a cluster**, or see the [documentation](https://docs.w8s.cloud).
 The reference architectures that deploy the other two are in
 [w8s-cloud/reference-architectures](https://github.com/w8s-cloud/reference-architectures).
 
+## The vetted chart catalog
+
+The Apps page also offers upstream charts as they come, at a version
+somebody checked: one file per chart in [`catalog/`](catalog), built into
+[`vetted/`](vetted) by `tools/import_charts.py`. To propose a chart, add a
+file to `catalog/` in a pull request; [`catalog/README.md`](catalog/README.md)
+says what a chart needs.
+
 ## Licence
 
 Apache-2.0 (`LICENSE`). Each chart's dependencies keep their own licences.

@@ -1,0 +1,17 @@
+artifacthub: victoriametrics/victoria-metrics-single
+name: VictoriaMetrics
+tagline: A single-node, Prometheus-compatible time-series database that stays small.
+description: |
+  Takes Prometheus remote-write, OpenTelemetry and more, and answers
+  PromQL (plus its MetricsQL superset), so Grafana and alerting work
+  unchanged. One binary and one volume, and typically less memory than
+  Prometheus for the same series.
+tags: [Metrics, Prometheus-compatible, Time series]
+category: observability
+git: {repo: VictoriaMetrics/helm-charts, path: charts/victoria-metrics-single, ref: b241be860f589e143f31cdd43ed8b5d8a9d82173}
+chart:
+  url: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-single
+  version: 0.47.0
+source: https://victoriametrics.com
+logo: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/3acd30be3427c5a63aa75b498af929daf2633480/app/vmui/packages/vmui/assets/favicon.svg
+logo_background: "#ffffff"

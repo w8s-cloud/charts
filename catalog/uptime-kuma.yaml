@@ -1,0 +1,15 @@
+artifacthub: uptime-kuma/uptime-kuma
+name: Uptime Kuma
+tagline: A friendly self-hosted uptime monitor with status pages and notifications.
+description: |
+  Watches HTTP, TCP, DNS and more on a schedule, draws the history and
+  notifies through 90+ services. Configured in its web UI; state on a
+  persistent volume. Community-maintained chart.
+tags: [Uptime, Status page, Alerting]
+category: observability
+git: {repo: dirsigler/uptime-kuma-helm, path: charts/uptime-kuma, ref: 09928909cc302f67a1e3f07c69cba98b83ff9ee6}
+chart:
+  url: https://github.com/dirsigler/uptime-kuma-helm/releases/download/uptime-kuma-4.2.0/uptime-kuma-4.2.0.tgz
+  version: 4.2.0
+source: https://github.com/louislam/uptime-kuma
+logo: https://raw.githubusercontent.com/louislam/uptime-kuma/b6adc19d00e4e6700f4b6ffc64a5c4e105e8004c/public/icon.svg
