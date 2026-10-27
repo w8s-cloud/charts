@@ -73,3 +73,9 @@ Listed so nobody probes them again. Each was refused for the reason given, at th
 - **kutt, polr, typo3, umami:** a PodDisruptionBudget and a database each.
 - **ProxySQL, Podgrab:** no logo under 256 KiB.
 - **CloudNativePG:** an operator.
+
+## Tests
+
+```sh
+python3 -m unittest discover -s tools/tests   # needs PyYAML; no network
+```
