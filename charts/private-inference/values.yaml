@@ -67,3 +67,24 @@ client:
     namespace: w8s-system
   # The model the chat page starts with.
   defaultModel: llama3.2:3b
+  # Open WebUI (open-webui.com, MIT) as the chat page, in place of the
+  # small one above: accounts, chat history, file uploads. It reaches the
+  # model through the `inference` Service, so it never holds the key.
+  # With a hostname, that publishes Open WebUI rather than the bare API:
+  # people sign in to it, and the first account to sign up is its admin,
+  # so sign up before you share the hostname.
+  openWebui:
+    enabled: false
+    image: ghcr.io/open-webui/open-webui:0.12.5
+    pullPolicy: IfNotPresent
+    # In-cluster Service: http://open-webui.<namespace>.svc
+    serviceName: open-webui
+    # The name in its page title and sign-in page.
+    name: Private inference
+    # Users, chats and uploads. Kept when the release is uninstalled.
+    storage:
+      size: 5Gi
+      storageClassName: ""
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+      limits: {memory: 2Gi}
