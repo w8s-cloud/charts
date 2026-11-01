@@ -67,8 +67,9 @@ spec:
     - {name: http, port: 80, targetPort: http}
 {{- if .Values.client.hostname }}
 ---
-# Publishes the chat page and the API. Anyone who reaches the hostname can
-# use the model.
+# Publishes the chat page and the API: anyone who reaches the hostname can
+# use the model. With Open WebUI, it publishes Open WebUI alone, and people
+# sign in to use it.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -83,7 +84,7 @@ spec:
     - {{ .Values.client.hostname | quote }}
   rules:
     - backendRefs:
-        - name: {{ .Values.client.serviceName }}
+        - name: {{ .Values.client.openWebui.enabled | ternary .Values.client.openWebui.serviceName .Values.client.serviceName }}
           port: 80
 {{- end }}
 {{- end }}

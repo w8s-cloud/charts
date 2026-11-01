@@ -31,7 +31,8 @@ own GPU and also wants the chat page uses `role: both`.
 | gpu, both | Service `inference-gpu` | the gateway |
 | gpu | `ServiceExport` | what the other clusters reach |
 | client, both | Deployment + Service `inference` | nginx that adds the key and forwards `/api/...` (Ollama's API) and `/v1/...` (OpenAI-compatible) to the GPU cluster, and serves the chat page at `/` |
-| client, both | HTTPRoute (when `client.hostname` is set) | publishes the chat page, and with it the API |
+| client, both | Deployment + Service `open-webui`, PVC `<release>-open-webui` (when `client.openWebui.enabled`) | [Open WebUI](https://openwebui.com) as the chat page, using `inference` as its Ollama. Accounts and chats are on the PVC, which is kept on uninstall |
+| client, both | HTTPRoute (when `client.hostname` is set) | publishes the chat page, and with it the API; with Open WebUI, publishes Open WebUI only, behind its sign-in |
 | all | Secret `<release>-key` | the shared key, unless `apiKey.existingSecret` names one |
 
 Apps in a client cluster call `http://inference.<namespace>.svc/v1/chat/completions`

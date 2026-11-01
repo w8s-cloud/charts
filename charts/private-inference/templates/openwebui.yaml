@@ -1,0 +1,86 @@
+{{- if and (include "pi.client" .) .Values.client.openWebui.enabled }}
+{{- $name := include "pi.name" . }}
+{{- $ow := .Values.client.openWebui }}
+# Open WebUI, as the chat page: its Ollama is this cluster's `inference`
+# Service, which adds the key and forwards to the GPU cluster, so it
+# never holds the key either. It keeps its users and chats on the volume
+# below; the first account to sign up is its admin.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-open-webui
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: open-webui
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $ow.storage.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $ow.storage.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-open-webui
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: open-webui
+spec:
+  replicas: 1
+  # One pod on a ReadWriteOnce volume: the old one goes before the new starts.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: open-webui
+  template:
+    metadata:
+      labels:
+        {{- include "pi.labels" . | nindent 8 }}
+        app.kubernetes.io/component: open-webui
+    spec:
+      containers:
+        - name: open-webui
+          image: {{ $ow.image }}
+          imagePullPolicy: {{ $ow.pullPolicy }}
+          env:
+            - {name: OLLAMA_BASE_URL, value: "http://{{ .Values.client.serviceName }}.{{ .Release.Namespace }}.svc"}
+            # Only the model this release serves: no OpenAI account to call out to.
+            - {name: ENABLE_OPENAI_API, value: "False"}
+            - {name: DEFAULT_MODELS, value: {{ .Values.client.defaultModel | quote }}}
+            - {name: WEBUI_NAME, value: {{ $ow.name | quote }}}
+          ports:
+            - {name: http, containerPort: 8080}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+          resources:
+            {{- toYaml $ow.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /app/backend/data}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $name }}-open-webui
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $ow.serviceName }}
+  labels:
+    {{- include "pi.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: open-webui
+  ports:
+    - {name: http, port: 80, targetPort: http}
+{{- end }}
