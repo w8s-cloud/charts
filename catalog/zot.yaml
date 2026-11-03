@@ -1,0 +1,16 @@
+artifacthub: zot/zot
+name: zot
+tagline: A minimal OCI registry for container images and Helm charts.
+description: |
+  zot is a vendor-neutral registry that stores only OCI artifacts:
+  images, charts, signatures. One binary with its storage on the
+  cluster, and a web UI for browsing.
+tags: [Registry, OCI, Images]
+category: storage
+git: {repo: project-zot/helm-charts, path: charts/zot, ref: a2674ea90e22147925f73c750974221e649b19a7}
+chart:
+  url: https://github.com/project-zot/helm-charts/releases/download/zot-0.1.125/zot-0.1.125.tgz
+  version: 0.1.125
+source: https://zotregistry.dev
+logo: https://raw.githubusercontent.com/project-zot/project-zot.github.io/7e4969196d28a01cdffe242d4bac4859e64fa1bf/docs/assets/images/logo.svg
+values: {persistence: true}

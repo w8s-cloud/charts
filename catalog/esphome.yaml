@@ -1,0 +1,17 @@
+artifacthub: gabe565/esphome
+name: ESPHome
+tagline: Builds and flashes firmware for ESP32 and ESP8266 devices.
+description: |
+  Describe a device in YAML and ESPHome compiles the firmware and flashes it
+  over the network, which is how a few hundred sensors stay maintainable. The
+  build cache and every device's configuration live on a 4 GiB volume - run
+  it at the site whose devices it flashes.
+tags: [Firmware, ESP32, IoT]
+category: other
+git: {repo: gabe565/charts, path: charts/esphome, ref: esphome-0.15.0}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/esphome-0.15.0/esphome-0.15.0.tgz
+  version: 0.15.0
+source: https://esphome.io
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 4Gi}}

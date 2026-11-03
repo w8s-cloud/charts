@@ -1,0 +1,15 @@
+name: Homepage
+tagline: One page in front of everything else you run.
+description: |
+  A dashboard for the services on your clusters: links, status, and
+  widgets that read from the things they point at. Configured by editing
+  the ConfigMap this chart installs - there is nothing to persist, so it
+  starts the same way every time.
+tags: [Dashboard, Links, Status]
+category: web
+git: {repo: jameswynn/helm-charts, path: charts/homepage, ref: homepage-2.1.0}
+chart:
+  url: https://github.com/jameswynn/helm-charts/releases/download/homepage-2.1.0/homepage-2.1.0.tgz
+  version: 2.1.0
+source: https://gethomepage.dev
+logo: https://raw.githubusercontent.com/gethomepage/homepage/main/public/android-chrome-192x192.png

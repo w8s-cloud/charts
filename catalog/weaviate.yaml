@@ -1,0 +1,15 @@
+artifacthub: weaviate/weaviate
+name: Weaviate
+tagline: A vector database with hybrid keyword and vector search built in.
+description: |
+  Weaviate stores objects with their vectors and searches them by
+  meaning, by keyword, or both at once. Bring your own embeddings or let
+  a module make them.
+tags: [Vector database, Hybrid search, RAG]
+category: ai
+git: {repo: weaviate/weaviate-helm, path: weaviate, ref: a65e52905feab86768b597393226050b88e3b145}
+chart:
+  url: https://github.com/weaviate/weaviate-helm/releases/download/v17.8.3/weaviate.tgz
+  version: 17.8.3
+source: https://weaviate.io
+logo: https://raw.githubusercontent.com/weaviate/weaviate-io/07f3fa61ce21db19c4ce142d547b3d7597c3b21c/static/img/site/icon.svg

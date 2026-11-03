@@ -1,0 +1,669 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "affinity": {
+      "description": "Affinity settings for pod assignment",
+      "required": [],
+      "title": "affinity",
+      "type": "object"
+    },
+    "autoscaling": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "maxReplicas": {
+          "default": 100,
+          "title": "maxReplicas",
+          "type": "integer"
+        },
+        "minReplicas": {
+          "default": 1,
+          "title": "minReplicas",
+          "type": "integer"
+        },
+        "targetCPUUtilizationPercentage": {
+          "default": 80,
+          "title": "targetCPUUtilizationPercentage",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "minReplicas",
+        "maxReplicas",
+        "targetCPUUtilizationPercentage"
+      ],
+      "title": "autoscaling",
+      "type": "object"
+    },
+    "config": {
+      "properties": {
+        "grafana": {
+          "properties": {
+            "apiToken": {
+              "default": "",
+              "description": "The auth token to pass to the Grafana API, see https://grafana.com/docs/grafana/latest/http_api/auth/",
+              "title": "apiToken",
+              "type": "string"
+            },
+            "defaultDatasourceId": {
+              "default": "",
+              "description": "The default Grafana datasource ID to use (overrides Grafana's own default).",
+              "title": "defaultDatasourceId",
+              "type": "string"
+            },
+            "enabled": {
+              "default": false,
+              "description": "Enable integration with Grafana",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "existingSecret": {
+              "default": "",
+              "description": "An existing secret containing the auth token, key needs to be api-token",
+              "title": "existingSecret",
+              "type": "string"
+            },
+            "url": {
+              "default": "",
+              "description": "The URL of your Grafana installation",
+              "title": "url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "apiToken",
+            "defaultDatasourceId",
+            "existingSecret",
+            "url"
+          ],
+          "title": "grafana",
+          "type": "object"
+        },
+        "log": {
+          "properties": {
+            "format": {
+              "default": "json",
+              "description": "Output format of log messages. One of: [logfmt, json]",
+              "title": "format",
+              "type": "string"
+            },
+            "level": {
+              "default": "info",
+              "description": "Only log messages with the given severity or above. One of: [debug, info, warn, error]",
+              "title": "level",
+              "type": "string"
+            }
+          },
+          "required": [
+            "format",
+            "level"
+          ],
+          "title": "log",
+          "type": "object"
+        },
+        "sharedLinks": {
+          "properties": {
+            "gcs": {
+              "properties": {
+                "bucket": {
+                  "default": "",
+                  "description": "Name of the GCS bucket for storing shared links",
+                  "title": "bucket",
+                  "type": "string"
+                },
+                "enabled": {
+                  "default": false,
+                  "description": "Enable Link Sharing via Google Storage Bucket",
+                  "title": "enabled",
+                  "type": "boolean"
+                },
+                "existingSecret": {
+                  "default": "",
+                  "description": "An existing secret containing the credentials for the storage-account as json, key needs to be gcs-cred.json",
+                  "title": "existingSecret",
+                  "type": "string"
+                },
+                "storageAccount": {
+                  "default": "",
+                  "description": "Google Cloud Storage Account key",
+                  "title": "storageAccount",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "enabled",
+                "bucket",
+                "existingSecret",
+                "storageAccount"
+              ],
+              "title": "gcs",
+              "type": "object"
+            },
+            "sql": {
+              "properties": {
+                "createTables": {
+                  "default": true,
+                  "description": "Whether to automatically create the required tables when using a SQL database for shared links.",
+                  "title": "createTables",
+                  "type": "boolean"
+                },
+                "driver": {
+                  "default": "sqlite",
+                  "description": "The SQL driver to use for storing shared links in a SQL database. Supported values: [mysql, sqlite].",
+                  "title": "driver",
+                  "type": "string"
+                },
+                "dsn": {
+                  "default": "/tmp/promlens-links.db",
+                  "description": "SQL Data Source Name when using a SQL database to shared links (see https://github.com/go-sql-driver/mysql#dsn-data-source-name) for MySQL, https://github.com/glebarez/go-sqlite#example for SQLite)",
+                  "title": "dsn",
+                  "type": "string"
+                },
+                "enabled": {
+                  "default": false,
+                  "description": "Enable Link Sharing via SQL database",
+                  "title": "enabled",
+                  "type": "boolean"
+                },
+                "existingSecret": {
+                  "default": "",
+                  "description": "An existing secret containing the dsn for the link storage backend, key needs to be dsn",
+                  "title": "existingSecret",
+                  "type": "string"
+                },
+                "retention": {
+                  "default": "0",
+                  "description": "The maximum retention time for shared links when using a SQL database (e.g. '10m', '12h'). Set to 0 for infinite retention.",
+                  "title": "retention",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "enabled",
+                "createTables",
+                "driver",
+                "dsn",
+                "existingSecret",
+                "retention"
+              ],
+              "title": "sql",
+              "type": "object"
+            }
+          },
+          "required": [
+            "gcs",
+            "sql"
+          ],
+          "title": "sharedLinks",
+          "type": "object"
+        },
+        "web": {
+          "properties": {
+            "defaultPrometheusUrl": {
+              "default": "",
+              "description": "The default Prometheus URL to load PromLens with.",
+              "title": "defaultPrometheusUrl",
+              "type": "string"
+            },
+            "externalUrl": {
+              "default": "",
+              "description": "The URL under which PromLens is externally reachable (for example, if PromLens is served via a reverse proxy). Used for generating relative and absolute links back to PromLens itself. If the URL has a path portion, it will be used to prefix all HTTP endpoints served by PromLens. If omitted, relevant URL components will be derived automatically.",
+              "title": "externalUrl",
+              "type": "string"
+            },
+            "routePrefix": {
+              "default": "",
+              "description": "Prefix for the internal routes of web endpoints. Defaults to path of --web.external-url.",
+              "title": "routePrefix",
+              "type": "string"
+            }
+          },
+          "required": [
+            "defaultPrometheusUrl",
+            "externalUrl",
+            "routePrefix"
+          ],
+          "title": "web",
+          "type": "object"
+        }
+      },
+      "required": [
+        "grafana",
+        "log",
+        "sharedLinks",
+        "web"
+      ],
+      "title": "config",
+      "type": "object"
+    },
+    "fullnameOverride": {
+      "default": "",
+      "description": "String to fully override `\"promlens.fullname\"`",
+      "title": "fullnameOverride",
+      "type": "string"
+    },
+    "global": {
+      "description": "Global values are values that can be accessed from any chart or subchart by exactly the same name.",
+      "required": [],
+      "title": "global",
+      "type": "object"
+    },
+    "image": {
+      "properties": {
+        "pullPolicy": {
+          "default": "Always",
+          "description": "image pull policy",
+          "title": "pullPolicy",
+          "type": "string"
+        },
+        "registry": {
+          "default": "docker.io",
+          "description": "image registory",
+          "title": "registry",
+          "type": "string"
+        },
+        "repository": {
+          "default": "prom/promlens",
+          "description": "image repository",
+          "title": "repository",
+          "type": "string"
+        },
+        "tag": {
+          "default": "v0.4.0",
+          "description": "Overrides the image tag",
+          "title": "tag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "registry",
+        "repository",
+        "pullPolicy",
+        "tag"
+      ],
+      "title": "image",
+      "type": "object"
+    },
+    "imagePullSecrets": {
+      "description": "If defined, uses a Secret to pull an image from a private Docker registry or repository.",
+      "items": {
+        "required": []
+      },
+      "title": "imagePullSecrets",
+      "type": "array"
+    },
+    "ingress": {
+      "properties": {
+        "annotations": {
+          "description": "Annotations to add to the ingress",
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        },
+        "className": {
+          "default": "",
+          "description": "Ingress class name",
+          "title": "className",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable ingress",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "hosts": {
+          "description": "kubernetes.io/ingress.class: nginx\nkubernetes.io/tls-acme: \"true\"",
+          "items": {
+            "anyOf": [
+              {
+                "properties": {
+                  "host": {
+                    "default": "chart-example.local",
+                    "title": "host",
+                    "type": "string"
+                  },
+                  "paths": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "path": {
+                              "default": "/",
+                              "title": "path",
+                              "type": "string"
+                            },
+                            "pathType": {
+                              "default": "ImplementationSpecific",
+                              "title": "pathType",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "pathType"
+                          ],
+                          "type": "object"
+                        }
+                      ],
+                      "required": []
+                    },
+                    "title": "paths",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "host",
+                  "paths"
+                ],
+                "type": "object"
+              }
+            ],
+            "required": []
+          },
+          "title": "hosts",
+          "type": "array"
+        },
+        "tls": {
+          "items": {
+            "required": []
+          },
+          "title": "tls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "className",
+        "annotations",
+        "hosts",
+        "tls"
+      ],
+      "title": "ingress",
+      "type": "object"
+    },
+    "nameOverride": {
+      "default": "",
+      "description": "Provide a name in place of `promlens`",
+      "title": "nameOverride",
+      "type": "string"
+    },
+    "nodeSelector": {
+      "description": "Node labels for pod assignment",
+      "required": [],
+      "title": "nodeSelector",
+      "type": "object"
+    },
+    "podAnnotations": {
+      "description": "Annotations to be added to exporter pods",
+      "required": [],
+      "title": "podAnnotations",
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "description": "Pod-level security context",
+      "required": [],
+      "title": "podSecurityContext",
+      "type": "object"
+    },
+    "priorityClassName": {
+      "default": "",
+      "description": "Priority class name for the pod",
+      "title": "priorityClassName",
+      "type": "string"
+    },
+    "replicaCount": {
+      "default": 1,
+      "description": "Number of replicas",
+      "title": "replicaCount",
+      "type": "integer"
+    },
+    "resources": {
+      "description": "Resource limits and requests for the pods.",
+      "required": [],
+      "title": "resources",
+      "type": "object"
+    },
+    "revisionHistoryLimit": {
+      "default": 10,
+      "description": "The number of old ReplicaSets to retain",
+      "title": "revisionHistoryLimit",
+      "type": "integer"
+    },
+    "route": {
+      "description": "BETA: Configure the gateway routes for the chart here.\nMore routes can be added by adding a dictionary key like the 'main' route.\nBeing BETA this can/will change in the future without notice, do not use unless you want to take that risk\n[[ref]](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io%2fv1alpha2)",
+      "properties": {
+        "main": {
+          "properties": {
+            "additionalRules": {
+              "description": "Additional custom rules that can be added to the route",
+              "items": {
+                "required": []
+              },
+              "title": "additionalRules",
+              "type": "array"
+            },
+            "annotations": {
+              "description": "Add annotations to the route",
+              "required": [],
+              "title": "annotations",
+              "type": "object"
+            },
+            "apiVersion": {
+              "default": "gateway.networking.k8s.io/v1",
+              "description": "Set the route apiVersion, e.g. gateway.networking.k8s.io/v1 or gateway.networking.k8s.io/v1alpha2",
+              "title": "apiVersion",
+              "type": "string"
+            },
+            "enabled": {
+              "default": false,
+              "description": "Enables or disables the route",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "filters": {
+              "description": "Filters define the filters that are applied to requests that match this rule.",
+              "items": {
+                "required": []
+              },
+              "title": "filters",
+              "type": "array"
+            },
+            "hostnames": {
+              "description": "Hostnames to be matched",
+              "items": {
+                "required": []
+              },
+              "title": "hostnames",
+              "type": "array"
+            },
+            "httpsRedirect": {
+              "default": false,
+              "description": "adds a filter for redirecting to https (HTTP 301 Moved Permanently). To redirect HTTP traffic to HTTPS, you need to have a Gateway with both HTTP and HTTPS listeners. Matches and filters do not take effect if enabled. Ref. https://gateway-api.sigs.k8s.io/guides/http-redirect-rewrite/",
+              "title": "httpsRedirect",
+              "type": "boolean"
+            },
+            "kind": {
+              "default": "HTTPRoute",
+              "description": "Set the route kind\nValid options are GRPCRoute, HTTPRoute, TCPRoute, TLSRoute, UDPRoute",
+              "title": "kind",
+              "type": "string"
+            },
+            "labels": {
+              "description": "Add labels to the route",
+              "required": [],
+              "title": "labels",
+              "type": "object"
+            },
+            "matches": {
+              "description": "define conditions used for matching the rule against incoming HTTP requests.",
+              "items": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "path": {
+                        "properties": {
+                          "type": {
+                            "default": "PathPrefix",
+                            "title": "type",
+                            "type": "string"
+                          },
+                          "value": {
+                            "default": "/",
+                            "title": "value",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "value"
+                        ],
+                        "title": "path",
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "required": []
+              },
+              "title": "matches",
+              "type": "array"
+            },
+            "parentRefs": {
+              "description": "Parent references (Gateway)",
+              "items": {
+                "required": []
+              },
+              "title": "parentRefs",
+              "type": "array"
+            },
+            "timeouts": {
+              "description": "defines the timeouts that can be configured for an HTTP request",
+              "required": [],
+              "title": "timeouts",
+              "type": "object"
+            }
+          },
+          "required": [
+            "enabled",
+            "apiVersion",
+            "kind",
+            "annotations",
+            "labels",
+            "hostnames",
+            "parentRefs",
+            "matches",
+            "filters",
+            "additionalRules",
+            "httpsRedirect",
+            "timeouts"
+          ],
+          "title": "main",
+          "type": "object"
+        }
+      },
+      "required": [
+        "main"
+      ],
+      "title": "route",
+      "type": "object"
+    },
+    "securityContext": {
+      "description": "container-level security context",
+      "required": [],
+      "title": "securityContext",
+      "type": "object"
+    },
+    "service": {
+      "properties": {
+        "port": {
+          "default": 8080,
+          "description": "Kubernetes port where service is exposed",
+          "title": "port",
+          "type": "integer"
+        },
+        "type": {
+          "default": "ClusterIP",
+          "description": "Kubernetes service type",
+          "title": "type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "port"
+      ],
+      "title": "service",
+      "type": "object"
+    },
+    "serviceAccount": {
+      "properties": {
+        "annotations": {
+          "description": "Annotations to add to the service account",
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        },
+        "create": {
+          "default": true,
+          "description": "Specifies whether a service account should be created",
+          "title": "create",
+          "type": "boolean"
+        },
+        "name": {
+          "default": "",
+          "description": "The name of the service account to use.\nIf not set and create is true, a name is generated using the fullname template",
+          "title": "name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "create",
+        "annotations",
+        "name"
+      ],
+      "title": "serviceAccount",
+      "type": "object"
+    },
+    "tolerations": {
+      "description": "Toleration labels for pod assignment",
+      "items": {
+        "required": []
+      },
+      "title": "tolerations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "nameOverride",
+    "fullnameOverride",
+    "image",
+    "imagePullSecrets",
+    "replicaCount",
+    "revisionHistoryLimit",
+    "serviceAccount",
+    "podAnnotations",
+    "podSecurityContext",
+    "securityContext",
+    "service",
+    "ingress",
+    "route",
+    "resources",
+    "autoscaling",
+    "nodeSelector",
+    "tolerations",
+    "affinity",
+    "priorityClassName",
+    "config"
+  ],
+  "type": "object"
+}

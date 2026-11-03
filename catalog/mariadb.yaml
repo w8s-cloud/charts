@@ -1,0 +1,16 @@
+artifacthub: groundhog2k/mariadb
+name: MariaDB
+tagline: The community MySQL fork, as one server on a volume.
+description: |
+  MariaDB speaks MySQL's protocol, so MySQL clients and PHP applications
+  work against it unchanged. One server with its data on a 10 GiB volume.
+  Export its Service and the organisation's other clusters can use it too.
+tags: [SQL, Relational, MySQL-compatible]
+category: db
+git: {repo: groundhog2k/helm-charts, path: charts/mariadb, ref: mariadb-4.5.4}
+chart:
+  url: https://github.com/groundhog2k/helm-charts/releases/download/mariadb-4.5.4/mariadb-4.5.4.tgz
+  version: 4.5.4
+source: https://mariadb.org
+logo: https://raw.githubusercontent.com/docker-library/docs/master/mariadb/logo.png
+values: {storage: {requestedSize: 10Gi}}

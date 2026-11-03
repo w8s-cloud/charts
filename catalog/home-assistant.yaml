@@ -1,0 +1,17 @@
+artifacthub: gabe565/home-assistant
+name: Home Assistant
+tagline: Local home and building automation, with the state kept on site.
+description: |
+  Home Assistant talks to thousands of devices and ties them together with
+  its own automations, locally - which is the point of running it on a
+  cluster at the site rather than in somebody's cloud. Its configuration and
+  history live on a 4 GiB volume.
+tags: [Automation, IoT, Local]
+category: other
+git: {repo: gabe565/charts, path: charts/home-assistant, ref: home-assistant-0.17.0}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/home-assistant-0.17.0/home-assistant-0.17.0.tgz
+  version: 0.17.0
+source: https://www.home-assistant.io
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 4Gi}}

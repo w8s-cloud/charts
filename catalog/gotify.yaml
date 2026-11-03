@@ -1,0 +1,17 @@
+artifacthub: gabe565/gotify
+name: Gotify
+tagline: A server for your own push notifications, over WebSocket.
+description: |
+  Anything that can make an HTTP request can send a message to Gotify, and
+  its apps and web client receive it the moment it arrives - a backup that
+  finished, a job that failed, a door that opened. Applications and their
+  tokens live on a 2 GiB volume (SQLite).
+tags: [Notifications, Push, WebSocket]
+category: messaging
+git: {repo: gabe565/charts, path: charts/gotify, ref: gotify-0.4.0}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/gotify-0.4.0/gotify-0.4.0.tgz
+  version: 0.4.0
+source: https://gotify.net
+values:
+  persistence: {data: {enabled: true, accessMode: ReadWriteOnce, size: 2Gi}}

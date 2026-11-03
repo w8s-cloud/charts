@@ -1,0 +1,16 @@
+artifacthub: gabe565/rss-bridge
+name: RSS-Bridge
+tagline: Makes a feed out of a site that stopped publishing one.
+description: |
+  RSS-Bridge scrapes a page and serves it as RSS, Atom or JSON, with a
+  bridge per site for several hundred sites. Pair it with a reader - the
+  FreshRSS entry in this catalog is one. Its cache is on a 1 GiB volume.
+tags: [RSS, Scraping, Feeds]
+category: web
+git: {repo: gabe565/charts, path: charts/rss-bridge, ref: rss-bridge-0.5.2}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/rss-bridge-0.5.2/rss-bridge-0.5.2.tgz
+  version: 0.5.2
+source: https://rss-bridge.org
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 1Gi}}

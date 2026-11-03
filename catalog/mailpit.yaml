@@ -1,0 +1,15 @@
+artifacthub: jouve/mailpit
+name: Mailpit
+tagline: An email and SMTP testing tool that catches mail and shows it in a web UI.
+description: |
+  Point an app's SMTP settings at Mailpit and every message it sends
+  lands in Mailpit's inbox instead of a real one: for development and
+  staging clusters. Community-maintained chart.
+tags: [Email, SMTP, Testing]
+category: other
+git: {repo: jouve/charts, path: charts/mailpit, ref: b5f7458dda89672a59dfbe8c7bfd39d245bbe0c2}
+chart:
+  url: https://github.com/jouve/charts/releases/download/mailpit-0.37.0/mailpit-0.37.0.tgz
+  version: 0.37.0
+source: https://mailpit.axllent.org
+logo: https://raw.githubusercontent.com/axllent/mailpit/cbef5f288e5134853d018c88b5afa95ee359cc8c/server/ui/favicon.svg

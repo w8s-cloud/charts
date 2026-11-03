@@ -1,0 +1,16 @@
+artifacthub: stevehipwell/nexus3
+name: Sonatype Nexus Repository
+tagline: One repository for Maven, npm, Docker and the rest of your artifacts.
+description: |
+  Nexus holds the packages your builds publish and proxies the ones they
+  pull, in one place with one set of credentials: Maven, npm, PyPI, raw
+  files and container images. Its storage is a 20 GiB volume - give it more
+  before you point a build farm at it.
+tags: [Artifacts, Registry, Proxy]
+category: storage
+git: {repo: stevehipwell/helm-charts, path: charts/nexus3, ref: nexus3-5.26.2}
+chart:
+  url: https://github.com/stevehipwell/helm-charts/releases/download/nexus3-5.26.2/nexus3-5.26.2.tgz
+  version: 5.26.2
+source: https://www.sonatype.com/products/sonatype-nexus-repository
+values: {persistence: {enabled: true, size: 20Gi}}

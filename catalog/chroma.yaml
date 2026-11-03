@@ -1,0 +1,15 @@
+artifacthub: chromadb-helm/chromadb
+name: Chroma
+tagline: The open-source embedding database, small enough to start with and keep.
+description: |
+  Chroma stores documents and their embeddings and answers nearest-
+  neighbour queries, with a Python and JavaScript client. This is the
+  community-maintained chart (amikos-tech/chromadb-chart).
+tags: [Vector database, RAG, Embeddings]
+category: ai
+git: {repo: amikos-tech/chromadb-chart, path: charts/chromadb-chart, ref: c4f4a6d3b7fa448673f2fcf25761a34994d37d12}
+chart:
+  url: https://github.com/amikos-tech/chromadb-chart/releases/download/chromadb-0.2.2/chromadb-0.2.2.tgz
+  version: 0.2.2
+source: https://www.trychroma.com
+logo: https://raw.githubusercontent.com/chroma-core/chroma/e122af79fd42216d6319ff248914a22142c4ab49/docs/mintlify/images/favicon.svg

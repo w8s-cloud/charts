@@ -1,0 +1,16 @@
+artifacthub: pascaliske/pairdrop
+name: PairDrop
+tagline: Send files between devices in the browser, peer to peer.
+description: |
+  An AirDrop for any device with a browser: open the page on both ends
+  and drop the file. Transfers go device to device over WebRTC; the
+  server only introduces them, and keeps nothing. Community-maintained
+  chart.
+tags: [File sharing, WebRTC, Transfer]
+category: productivity
+git: {repo: pascaliske/helm-charts, path: charts/pairdrop, ref: efda91d379716aef2408c92060e7375aacda3f35}
+chart:
+  url: https://github.com/pascaliske/helm-charts/releases/download/pairdrop-2.0.0/pairdrop-2.0.0.tgz
+  version: 2.0.0
+source: https://github.com/schlagmichdoch/PairDrop
+logo: https://raw.githubusercontent.com/schlagmichdoch/PairDrop/1b0c9c9d903c3cfc706df1303dc75c3b54d04c77/public/images/logo_blue_512x512.png

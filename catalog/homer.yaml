@@ -1,0 +1,16 @@
+artifacthub: gabe565/homer
+name: Homer
+tagline: A static start page for the services a site runs.
+description: |
+  One YAML file lists your services and Homer renders a page of them, with
+  optional health checks beside each. No database and nothing to log in to -
+  the page is the configuration, on a 1 GiB volume.
+tags: [Dashboard, Links, Static]
+category: web
+git: {repo: gabe565/charts, path: charts/homer, ref: homer-0.13.0}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/homer-0.13.0/homer-0.13.0.tgz
+  version: 0.13.0
+source: https://github.com/bastienwirtz/homer
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 1Gi}}

@@ -1,0 +1,19 @@
+artifacthub: pmint93/metabase
+name: Metabase
+tagline: Questions, charts and dashboards over your databases, without writing SQL.
+description: |
+  Point it at Postgres, MySQL, ClickHouse or a dozen other databases and
+  ask questions with a point-and-click builder, or SQL when you want it.
+  This starts on Metabase's own embedded database on a 5 GiB volume -
+  fine to start with; for production, point `database` at a PostgreSQL.
+  Community-maintained chart.
+tags: [BI, Dashboards, Analytics]
+category: data
+git: {repo: pmint93/helm-charts, path: charts/metabase, ref: 978c6f01ed1c805e861688d9083ddaea43cbb67e}
+chart:
+  url: https://github.com/pmint93/helm-charts/releases/download/metabase-2.27.7/metabase-2.27.7.tgz
+  version: 2.27.7
+source: https://www.metabase.com
+logo: https://raw.githubusercontent.com/metabase/metabase/0e58a35cea0efcefcd264adcd207b61007784f15/resources/frontend_client/app/assets/img/logo.svg
+values:
+  database: {persistence: {enabled: true, size: 5Gi}}

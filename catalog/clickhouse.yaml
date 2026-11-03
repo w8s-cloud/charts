@@ -1,0 +1,15 @@
+artifacthub: pascaliske/clickhouse
+name: ClickHouse
+tagline: A column-oriented database for fast analytics over large tables.
+description: |
+  ClickHouse answers aggregate queries over billions of rows in
+  milliseconds - event data, logs, product analytics. One server with its
+  data on a volume. Community-maintained chart.
+tags: [Analytics, OLAP, SQL]
+category: data
+git: {repo: pascaliske/helm-charts, path: charts/clickhouse, ref: f4da24d14db976c27381be775cb2b4cbda4065e7}
+chart:
+  url: https://github.com/pascaliske/helm-charts/releases/download/clickhouse-1.0.0/clickhouse-1.0.0.tgz
+  version: 1.0.0
+source: https://clickhouse.com
+logo: https://raw.githubusercontent.com/ClickHouse/ClickHouse/7360ed818eda31adb16ef4d8ee44fe4390fde64c/docker/server/README.src/logo.svg

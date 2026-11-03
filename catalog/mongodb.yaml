@@ -1,0 +1,17 @@
+artifacthub: groundhog2k/mongodb
+name: MongoDB
+tagline: A document database, one server with its data on a volume.
+description: |
+  MongoDB stores JSON-shaped documents rather than rows, which suits an
+  application whose records keep changing shape. One server with its data
+  on a 10 GiB volume - not a replica set, and no operator.
+tags: [Document, NoSQL, JSON]
+category: db
+git: {repo: groundhog2k/helm-charts, path: charts/mongodb, ref: mongodb-0.8.3}
+chart:
+  url: https://github.com/groundhog2k/helm-charts/releases/download/mongodb-0.8.3/mongodb-0.8.3.tgz
+  version: 0.8.3
+source: https://www.mongodb.com
+logo: https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/mongodb.svg
+logo_background: "#ffffff"
+values: {storage: {requestedSize: 10Gi}}

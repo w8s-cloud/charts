@@ -1,0 +1,16 @@
+artifacthub: groundhog2k/mysql
+name: MySQL
+tagline: Oracle's MySQL server, one instance with its data on a volume.
+description: |
+  MySQL itself, for an application that wants the original rather than a
+  fork. One server, data on a 10 GiB volume, reachable from the
+  organisation's other clusters once you export its Service.
+tags: [SQL, Relational]
+category: db
+git: {repo: groundhog2k/helm-charts, path: charts/mysql, ref: mysql-3.1.4}
+chart:
+  url: https://github.com/groundhog2k/helm-charts/releases/download/mysql-3.1.4/mysql-3.1.4.tgz
+  version: 3.1.4
+source: https://www.mysql.com
+logo: https://raw.githubusercontent.com/docker-library/docs/master/mysql/logo.png
+values: {storage: {requestedSize: 10Gi}}

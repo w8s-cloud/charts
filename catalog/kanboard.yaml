@@ -1,0 +1,23 @@
+artifacthub: nicholaswilde/kanboard
+name: Kanboard
+tagline: A minimal kanban board for teams that want less tool, not more.
+description: |
+  Boards, swimlanes, WIP limits and an automatic-actions engine, with
+  nothing else in the way. Its SQLite database and plugins live on
+  volumes. The community chart pins an old image; this starts on the
+  current upstream release instead.
+tags: [Kanban, Tasks, Projects]
+category: project
+git: {repo: nicholaswilde/helm-charts, path: charts/kanboard, ref: 407ba2b91d5bf9ff78374b5dafd120a3603d5ed0}
+chart:
+  url: https://github.com/nicholaswilde/helm-charts/releases/download/kanboard-0.1.8/kanboard-0.1.8.tgz
+  version: 0.1.8
+source: https://kanboard.org
+logo: https://raw.githubusercontent.com/kanboard/kanboard/f822f427c17b2d7115dd52de072f2227dd233510/assets/img/inkscape-optimized-icon.svg
+values:
+  image: {tag: v1.2.54}
+  # The chart turns on an Ingress for a homelab address by default.
+  ingress: {enabled: false}
+  persistence:
+    data: {enabled: true, size: 2Gi}
+    plugins: {enabled: true}

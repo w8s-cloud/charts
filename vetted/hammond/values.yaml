@@ -1,0 +1,59 @@
+#
+# IMPORTANT NOTE
+#
+# This chart inherits from our common library chart. You can check the default values/options here:
+# https://github.com/bjw-s/helm-charts/blob/a081de5/charts/library/common/values.yaml
+#
+
+image:
+  # -- image repository
+  repository: ghcr.io/alfhou/hammond
+  # -- image pull policy
+  pullPolicy: IfNotPresent
+  # -- image tag
+  tag: v0.0.24
+
+# -- environment variables. [[ref]](https://github.com/AlfHou/hammond#environment-variables)
+# @default -- See [values.yaml](./values.yaml)
+env:
+  # -- (string) The secret used to sign the JWT token.
+  # There is a default value, but it is important that you change it to something else.
+  JWT_SECRET:
+
+# -- Configures service settings for the chart.
+# @default -- See [values.yaml](./values.yaml)
+service:
+  main:
+    ports:
+      http:
+        port: 3000
+
+ingress:
+  # -- Enable and configure ingress settings for the chart under this key.
+  # @default -- See [values.yaml](./values.yaml)
+  main:
+    enabled: false
+    # hosts:
+    #   - host: chart-example.local
+    #     paths:
+    #       - path: /
+    # tls:
+    #   - secretName: chart-example.local-tls
+    #     hosts:
+    #       - chart-example.local
+
+# -- Configure persistence settings for the chart under this key.
+# @default -- See [values.yaml](./values.yaml)
+persistence:
+  config:
+    enabled: false
+    retain: true
+    # storageClass: ""
+    # accessMode: ReadWriteOnce
+    # size: 1Gi
+  assets:
+    enabled: false
+    retain: true
+    # storageClass: ""
+    # accessMode: ReadWriteOnce
+    # size: 1Gi

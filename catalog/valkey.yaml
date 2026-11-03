@@ -1,0 +1,17 @@
+artifacthub: valkey/valkey
+name: Valkey
+tagline: The open-source Redis fork, as a single in-memory key/value server.
+description: |
+  Valkey is the Linux Foundation's BSD-licensed continuation of Redis:
+  same protocol, same clients. This installs one server with its data on
+  a 5 GiB volume. Other clusters in the organisation can reach it by
+  name once you export its Service.
+tags: [Key/value, Cache, Redis-compatible]
+category: db
+git: {repo: valkey-io/valkey-helm, path: valkey, ref: 8316f21ad549eb4041945a064b3b4380edaf7623}
+chart:
+  url: https://github.com/valkey-io/valkey-helm/releases/download/valkey-0.12.0/valkey-0.12.0.tgz
+  version: 0.12.0
+source: https://valkey.io
+logo: https://raw.githubusercontent.com/valkey-io/valkey-io.github.io/8f92e864967ba377d02b8fb563d46bc653955f01/static/img/Valkey-logo.svg
+values: {dataStorage: {enabled: true, requestedSize: 5Gi}}

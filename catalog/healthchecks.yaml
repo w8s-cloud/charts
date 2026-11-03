@@ -1,0 +1,17 @@
+artifacthub: gabe565/healthchecks
+name: Healthchecks
+tagline: Watches your cron jobs and tells you when one stops calling home.
+description: |
+  Every scheduled job gets a URL to ping when it finishes. Miss a ping and
+  Healthchecks tells you - which is the half of cron monitoring that cron
+  itself cannot do. Its checks and their history live on a 2 GiB volume
+  (SQLite); point it at Postgres when it outgrows that.
+tags: [Cron, Monitoring, Alerts]
+category: observability
+git: {repo: gabe565/charts, path: charts/healthchecks, ref: healthchecks-0.17.0}
+chart:
+  url: https://github.com/gabe565/charts/releases/download/healthchecks-0.17.0/healthchecks-0.17.0.tgz
+  version: 0.17.0
+source: https://healthchecks.io
+values:
+  persistence: {config: {enabled: true, accessMode: ReadWriteOnce, size: 2Gi}}

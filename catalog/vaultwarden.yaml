@@ -1,0 +1,17 @@
+artifacthub: vaultwarden/vaultwarden
+name: Vaultwarden
+tagline: A lightweight, Bitwarden-compatible password manager server.
+description: |
+  Vaultwarden implements the Bitwarden server API, so the official
+  Bitwarden apps and browser extensions work against it. Suited to a
+  team or family on a small cluster. Community-maintained chart.
+tags: [Passwords, Bitwarden-compatible]
+category: security
+git: {repo: guerzon/vaultwarden, path: charts/vaultwarden, ref: d78c24eb68e222daee2419425689a6aad44ee620}
+chart:
+  url: https://github.com/guerzon/vaultwarden/releases/download/v0.46.2/vaultwarden-0.46.2.tgz
+  version: 0.46.2
+source: https://github.com/dani-garcia/vaultwarden
+logo: https://raw.githubusercontent.com/dani-garcia/vaultwarden/061694d0cb3bbf5d4c7e920c892824f0020cff83/resources/vaultwarden-icon.svg
+logo_background: "#ffffff"
+values: {storage: {data: {name: vaultwarden-data, size: 1Gi}}}

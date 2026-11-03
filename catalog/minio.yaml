@@ -1,0 +1,24 @@
+artifacthub: minio-official/minio
+name: MinIO
+tagline: S3-compatible object storage, one server with its data on a volume.
+description: |
+  MinIO speaks the S3 API, so anything that writes to S3 can write here
+  instead - backups, uploads, a data pipeline's artifacts. This installs
+  one server (standalone mode) with 20 GiB of storage. Other clusters in
+  the organisation can reach it by name once you export its Service.
+tags: [Object storage, S3, Backups]
+category: storage
+git: {repo: minio/minio, path: helm/minio, ref: master}
+chart:
+  url: https://raw.githubusercontent.com/minio/minio/master/helm-releases/minio-5.4.0.tgz
+  version: 5.4.0
+source: https://min.io
+logo: https://raw.githubusercontent.com/minio/minio/master/.github/logo.svg
+logo_background: "#ffffff"
+# standalone, because distributed defaults to 16 replicas. users: []
+# drops the chart's post-install Job, which an app deployment may not
+# create - add users through the console instead.
+values:
+  mode: standalone
+  users: []
+  persistence: {enabled: true, size: 20Gi}
