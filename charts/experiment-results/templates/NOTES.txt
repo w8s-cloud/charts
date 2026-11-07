@@ -1,0 +1,8 @@
+The results server serves bucket {{ .Values.artifacts.bucket }}/{{ .Values.artifacts.prefix }} read-only.
+
+The token:
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.token.existingSecret | default (printf "%s-token" (.Release.Name | trunc 45 | trimSuffix "-")) }} -o jsonpath='{.data.token}' | base64 -d
+{{- with .Values.hostname }}
+
+  curl -H "Authorization: Bearer $TOKEN" https://{{ . }}/
+{{- end }}

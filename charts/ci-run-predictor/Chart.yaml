@@ -1,0 +1,13 @@
+apiVersion: v2
+name: ci-run-predictor
+description: >-
+  An experiment: trains a small neural network (PyTorch, CPU) on a CSV of
+  CI runs to predict a run's duration and whether it fails, and writes
+  metrics, plots, predictions and the model to your own bucket with
+  w8s-artifacts. Uninstall it afterwards; the results stay in the bucket.
+type: application
+version: 0.1.0
+dependencies:
+  - name: w8s-artifacts
+    version: 0.1.0
+    repository: file://../w8s-artifacts

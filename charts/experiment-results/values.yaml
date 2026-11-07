@@ -1,0 +1,26 @@
+# The bucket to serve. Only bucket, endpoint, region, provider, pathStyle,
+# existingSecret and prefix are read here (experiment is not used).
+artifacts:
+  experiment: results
+  bucket: ""
+  prefix: runs
+  endpoint: ""
+  region: us-east-1
+  provider: Other
+  pathStyle: true
+  existingSecret: ""
+
+# The bearer token every request needs. Generated once and kept when
+# empty; or name a Secret of your own with key `token`.
+token:
+  existingSecret: ""
+
+# Publish on this hostname through w8s (<name>-<cluster slug>.w8s.cloud,
+# or one under your verified domain). Empty: no route, reach it in-cluster.
+hostname: ""
+gateway:
+  name: w8s-agent-gateway
+  namespace: w8s-system
+
+rcloneImage: rclone/rclone:1.68.2
+nginxImage: nginx:1.27-alpine

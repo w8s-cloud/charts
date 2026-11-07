@@ -1,0 +1,56 @@
+# A stand-in for "your own bucket": rclone's S3 server on a disk, in the
+# cluster. Real use points the charts at AWS S3, R2, GCS or any S3 API.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-bucket
+  namespace: experiments
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 5Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-bucket
+  namespace: experiments
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: demo-bucket } }
+  template:
+    metadata: { labels: { app: demo-bucket } }
+    spec:
+      securityContext: { fsGroup: 65532 }
+      containers:
+        - name: s3
+          image: rclone/rclone:1.68.2
+          args: ["serve", "s3", "/data", "--addr=:9000", "--auth-key=$(ACCESS),$(SECRET)", "--vfs-cache-mode=writes", "--cache-dir=/tmp/cache"]
+          env:
+            - name: ACCESS
+              valueFrom: { secretKeyRef: { name: experiment-bucket, key: access-key-id } }
+            - name: SECRET
+              valueFrom: { secretKeyRef: { name: experiment-bucket, key: secret-access-key } }
+          ports: [{ containerPort: 9000 }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities: { drop: [ALL] }
+            seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: demo-bucket }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-bucket
+  namespace: experiments
+spec:
+  selector: { app: demo-bucket }
+  ports: [{ port: 9000, targetPort: 9000 }]

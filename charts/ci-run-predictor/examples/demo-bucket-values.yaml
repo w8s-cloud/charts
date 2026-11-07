@@ -1,0 +1,6 @@
+artifacts:
+  org: w3t
+  bucket: experiments
+  prefix: runs
+  endpoint: http://demo-bucket.experiments.svc:9000
+  existingSecret: experiment-bucket

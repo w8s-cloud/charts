@@ -1,0 +1,83 @@
+{{- include "w8s-artifacts.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-train
+data:
+  train.py: |
+{{ .Files.Get "files/train.py" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: ci-run-predictor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    w8s.cloud/artifacts: "true"
+    {{- with .Values.kueue.queue }}
+    kueue.x-k8s.io/queue-name: {{ . }}
+    {{- end }}
+spec:
+  {{- if .Values.kueue.queue }}
+  suspend: true
+  {{- end }}
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ci-run-predictor
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 65532
+      initContainers:
+        {{- include "w8s-artifacts.fetch" (dict "root" . "object" .Values.data.object) | nindent 8 }}
+      containers:
+        - name: train
+          image: {{ .Values.image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # Run the training, keep its log as an artifact, and tell the
+              # uploader how it ended (the w8s-artifacts contract).
+              {
+                sh -ec '
+                  pip install --quiet --no-cache-dir --target /tmp/py \
+                    --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple \
+                    torch=={{ .Values.torch }} numpy==2.1.3 matplotlib==3.9.2
+                  PYTHONPATH=/tmp/py python /train/train.py /data/{{ base .Values.data.object }} /artifacts
+                ' 2>&1
+                echo $? > /tmp/code
+              } | tee /artifacts/train.log
+              code=$(cat /tmp/code)
+              echo "$code" > /artifacts/.w8s-exit
+              exit "$code"
+          env:
+            - { name: EPOCHS, value: {{ .Values.train.epochs | quote }} }
+            - { name: HIDDEN, value: {{ .Values.train.hidden | quote }} }
+            - { name: LR, value: {{ .Values.train.learningRate | quote }} }
+            - { name: VAL_SHARE, value: {{ .Values.train.validationShare | quote }} }
+            - { name: SEED, value: {{ .Values.train.seed | quote }} }
+            - { name: MAX_DURATION_S, value: {{ .Values.train.maxDurationSeconds | quote }} }
+            - { name: HOME, value: /tmp }
+            - { name: MPLCONFIGDIR, value: /tmp/mpl }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "w8s-artifacts.mount" . | nindent 12 }}
+            - { name: data, mountPath: /data }
+            - { name: train, mountPath: /train }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities: { drop: [ALL] }
+            seccompProfile: { type: RuntimeDefault }
+        {{- include "w8s-artifacts.uploader" . | nindent 8 }}
+      volumes:
+        {{- include "w8s-artifacts.volumes" . | nindent 8 }}
+        - { name: data, emptyDir: {} }
+        - name: train
+          configMap: { name: {{ .Release.Name }}-train }

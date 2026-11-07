@@ -1,0 +1,6 @@
+dependencies:
+- name: w8s-artifacts
+  repository: file://../w8s-artifacts
+  version: 0.1.0
+digest: sha256:c153c0e5a5d7c62fea2868958f9c35ce254c06ba601c43da48459ecdae493b3d
+generated: "2026-11-07T11:25:08.470236172+01:00"

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: experiment-results
+description: >-
+  Serves an experiments bucket read-only over HTTP, behind a bearer token,
+  so dashboards and notebooks can read runs' metrics.csv, summary.json and
+  plots by URL. Install it once and keep it; experiments come and go.
+type: application
+version: 0.1.0
+dependencies:
+  - name: w8s-artifacts
+    version: 0.1.0
+    repository: file://../w8s-artifacts

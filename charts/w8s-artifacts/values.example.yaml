@@ -1,0 +1,13 @@
+# What a chart that includes w8s-artifacts puts under `artifacts:`.
+artifacts:
+  experiment: ci-run-predictor   # required: names the run's folder
+  org: w3t                       # optional, a folder level
+  bucket: experiments            # required
+  prefix: runs                   # optional, a folder level
+  endpoint: https://s3.eu-north-1.amazonaws.com   # required: any S3-compatible endpoint
+  region: eu-north-1
+  provider: Other                # rclone's s3 provider: AWS, Cloudflare, GCS, Other...
+  pathStyle: true
+  # required: a Secret in the release's namespace with keys
+  # access-key-id and secret-access-key
+  existingSecret: experiment-bucket

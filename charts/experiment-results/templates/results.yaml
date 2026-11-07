@@ -1,0 +1,125 @@
+{{- $name := .Release.Name | trunc 45 | trimSuffix "-" }}
+{{- $tokenSecret := .Values.token.existingSecret | default (printf "%s-token" $name) }}
+{{- if not .Values.token.existingSecret }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $tokenSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tokenSecret }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  token: {{ if $existing }}{{ index $existing.data "token" }}{{ else }}{{ randAlphaNum 40 | b64enc }}{{ end }}
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-nginx
+data:
+  default.conf.template: |
+    server {
+      listen 8080;
+      location = /healthz { return 200 "ok\n"; }
+      location / {
+        if ($http_authorization != "Bearer ${RESULTS_TOKEN}") {
+          add_header WWW-Authenticate 'Bearer realm="experiment-results"' always;
+          return 401;
+        }
+        limit_except GET HEAD { deny all; }
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Authorization "";
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: { app.kubernetes.io/name: experiment-results, app.kubernetes.io/instance: {{ .Release.Name }} }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: experiment-results, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: experiment-results, app.kubernetes.io/instance: {{ .Release.Name }} }
+    spec:
+      containers:
+        - name: rclone
+          image: {{ .Values.rcloneImage }}
+          args:
+            - serve
+            - http
+            - {{ printf "bucket:%s/%s" .Values.artifacts.bucket (trimAll "/" (.Values.artifacts.prefix | default "")) | trimSuffix "/" | quote }}
+            - --addr=127.0.0.1:8081
+            - --read-only
+            - --dir-cache-time=30s
+          env:
+            {{- include "w8s-artifacts.rcloneEnv" . | nindent 12 }}
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities: { drop: [ALL] }
+            seccompProfile: { type: RuntimeDefault }
+        - name: nginx
+          image: {{ .Values.nginxImage }}
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - name: RESULTS_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $tokenSecret }}, key: token } }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              mkdir -p /tmp/conf.d
+              envsubst '${RESULTS_TOKEN}' < /templates/default.conf.template > /tmp/conf.d/default.conf
+              sed 's#include /etc/nginx/conf.d/\*.conf;#include /tmp/conf.d/*.conf;#; s#^pid .*#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf > /tmp/nginx.conf
+              exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          volumeMounts:
+            - { name: templates, mountPath: /templates }
+            - { name: cache, mountPath: /var/cache/nginx }
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities: { drop: [ALL] }
+            seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: templates
+          configMap: { name: {{ $name }}-nginx }
+        - { name: cache, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  selector: { app.kubernetes.io/name: experiment-results, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports: [{ name: http, port: 80, targetPort: http }]
+{{- with .Values.hostname }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  annotations:
+    w8s.cloud/managed: "true"
+spec:
+  parentRefs:
+    - { name: {{ $.Values.gateway.name }}, namespace: {{ $.Values.gateway.namespace }} }
+  hostnames: [{{ . | quote }}]
+  rules:
+    - backendRefs:
+        - { name: {{ $name }}, port: 80 }
+{{- end }}

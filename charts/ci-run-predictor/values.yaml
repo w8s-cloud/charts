@@ -1,0 +1,39 @@
+# The bucket the run reads its data from and writes its artifacts to.
+# See charts/w8s-artifacts/values.example.yaml.
+artifacts:
+  experiment: ci-run-predictor
+  org: ""
+  bucket: ""
+  prefix: runs
+  endpoint: ""
+  region: us-east-1
+  provider: Other
+  pathStyle: true
+  existingSecret: ""
+
+# The training data: an object in the same bucket, a CSV with the columns
+# created_at,pipeline,branch,trigger,hour_utc,weekday,steps,duration_s,failed
+data:
+  object: datasets/ci-runs.csv
+
+train:
+  epochs: 300
+  hidden: 64
+  learningRate: 0.003
+  # The newest share of runs held out for validation (a time split).
+  validationShare: 0.2
+  seed: 7
+  # Runs longer than this are left out as bad records.
+  maxDurationSeconds: 21600
+
+image: python:3.12-slim
+# Installed at start; CPU wheels, so no CUDA download.
+torch: "2.5.1"
+# ephemeral-storage holds the pip install (torch is ~1 GiB unpacked).
+resources:
+  requests: { cpu: "2", memory: 3Gi, ephemeral-storage: 4Gi }
+  limits: { memory: 3Gi, ephemeral-storage: 4Gi }
+
+# Queue the Job with Kueue: the LocalQueue's name. Empty runs it at once.
+kueue:
+  queue: ""

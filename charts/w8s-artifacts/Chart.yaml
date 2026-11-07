@@ -1,0 +1,8 @@
+apiVersion: v2
+name: w8s-artifacts
+description: >-
+  A library chart for experiments: adds an /artifacts volume and an rclone
+  uploader container to a chart's Job, which copies whatever the job wrote
+  to your own S3-compatible bucket when the job ends, success or failure.
+type: library
+version: 0.1.0
