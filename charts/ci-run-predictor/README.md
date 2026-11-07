@@ -17,6 +17,19 @@ The run writes, using `w8s-artifacts`:
 - `model/model.pt`;
 - `train.log`.
 
+And, to look inside the network:
+- `network.json`: its layers, their sizes and the input names;
+- `weights.csv`: every weight (`layer,from,to,weight`);
+- `layers.csv`: per epoch and layer, the weight norm, the gradient norm
+  and the share of hidden units that never fire;
+- `units.csv`: each hidden unit's mean activation, the share of runs it
+  fires on, and (last hidden layer) its weight into each head;
+- `importance.csv`: per input (pipeline, weekday, trigger, branch, hour,
+  steps), how much worse validation gets when that input is shuffled;
+- `embedding.csv`: every run's last hidden layer projected to two
+  dimensions (PCA), with what the network predicted for it;
+- `network.png`: the network drawn with each layer's strongest connections.
+
 ## Try it
 
 You need a bucket (any S3 API), and a Secret named `experiment-bucket`
