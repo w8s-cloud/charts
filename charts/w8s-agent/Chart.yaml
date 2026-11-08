@@ -508,7 +508,17 @@ type: application
 # no longer reads a disconnected cluster as "older than 0.7.0" (#871).
 # The serving relay checks clusters' JWTs itself when given
 # relay.serve.operatorPublicKey (#875).
-version: 0.46.4
+#
+# 0.46.5: released with hub chart 0.46.5. The self-check no longer
+# warns that an organization's own hub relay has no hub link (#879).
+# The chart's source is published to github.com/w8s-cloud/charts (#882).
+#
+# 0.46.6: released with hub chart 0.46.6. No change to the agent chart
+# itself; it moves with the hub's version.
+#
+# 0.46.7: released with hub chart 0.46.7. No change to the agent chart
+# itself; it moves with the hub's version.
+version: 0.46.7
 # The agent binary's own version. Unchanged here: 0.5.0 is a chart-only
 # change, and the deployed image tag comes from values.yaml's image.tag
 # anyway, not from this field.

@@ -24,7 +24,7 @@ image:
   # moves this forward - keep this in step with Chart.yaml's version by
   # hand (ops/release-public publishes the image under this same tag,
   # from the hub's CI registry where ops/deploy-hub/hub-images tagged it).
-  tag: "0.46.4"
+  tag: "0.46.7"
   # The image's content digest (sha256:...). Empty in the source chart;
   # the published chart has it filled in for every chart version when the
   # chart is packaged (k8s/pin-images.sh), so a chart version
@@ -499,7 +499,7 @@ relay:
     # Same registry and reasoning as image.repository above.
     repository: oci.w8s.cloud/w8s/w8s-relay
     # Same as image.tag above: the chart's own version.
-    tag: "0.46.4"
+    tag: "0.46.7"
     # Same as image.digest and image.pullPolicy above.
     digest: "" # pin: relay.image
     pullPolicy: ""
@@ -729,7 +729,7 @@ scanner:
     # own version and pinned by digest when the chart is packaged, like
     # image and relay.image.
     repository: oci.w8s.cloud/w8s/w8s-clusterscan
-    tag: "0.46.4"
+    tag: "0.46.7"
     digest: "" # pin: scanner.image
     pullPolicy: ""
 
@@ -745,7 +745,7 @@ shell:
     # release as the chart's own version and pinned by digest when the
     # chart is packaged, like image and relay.image.
     repository: oci.w8s.cloud/w8s/wctl-shell
-    tag: "0.46.4"
+    tag: "0.46.7"
     digest: "" # pin: shell.image
     pullPolicy: ""
   # The hub API wctl in the terminal talks to; it reaches this cluster
