@@ -521,7 +521,10 @@ type: application
 #
 # 0.46.8: released with hub chart 0.46.8. No change to the agent chart
 # itself; it moves with the hub's version.
-version: 0.46.8
+#
+# 0.46.9: released with hub chart 0.46.9. No change to the agent chart
+# itself; it moves with the hub's version.
+version: 0.46.9
 # The agent binary's own version. Unchanged here: 0.5.0 is a chart-only
 # change, and the deployed image tag comes from values.yaml's image.tag
 # anyway, not from this field.
