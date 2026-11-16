@@ -172,7 +172,10 @@ capabilities.explorer.write's rules, cluster-wide or per namespace.
 {{- end }}
 {{/*
 What an app's Helm release writes (the kinds the charts the hub offers
-contain), and Secrets, where Helm keeps its releases.
+contain), and Secrets, where Helm keeps its releases. Jobs since 0.46.11:
+a database migration or first-start setup (Plane, Gitea, Zitadel) is a
+Job in most charts; its pods pass the same admission policy as a
+Deployment's.
 */}}
 {{- define "w8s-agent.appRules" -}}
 - apiGroups: [""]
@@ -180,6 +183,9 @@ contain), and Secrets, where Helm keeps its releases.
   verbs: {{ toJson .rw }}
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets"]
+  verbs: {{ toJson .rw }}
+- apiGroups: ["batch"]
+  resources: ["jobs"]
   verbs: {{ toJson .rw }}
 - apiGroups: ["multicluster.x-k8s.io"]
   resources: ["serviceexports"]
