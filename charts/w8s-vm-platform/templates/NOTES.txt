@@ -1,0 +1,26 @@
+KubeVirt v1.9.1 and CDI v1.66.1 are installing{{ if .Values.emulation }} (emulation on: VMs run in software){{ end }}.
+The operators install the rest; wait for both to be Available:
+
+  kubectl -n kubevirt wait kubevirt/kubevirt --for=condition=Available --timeout=15m
+  kubectl wait cdi/cdi --for=condition=Available --timeout=15m
+
+Nodes that can run VMs with KVM advertise devices.kubevirt.io/kvm:
+
+  kubectl get nodes -o custom-columns='NODE:.metadata.name,KVM:.status.allocatable.devices\.kubevirt\.io/kvm'
+{{- if eq .Values.storage "none" }}
+
+Storage: bring your own. CDI writes VM disks to the default StorageClass;
+without one, every import waits.
+{{- else }}
+
+Storage: local-path on {{ .Values.localPath.path }} of each node{{ if .Values.localPath.defaultClass }}, the default StorageClass{{ end }}.
+Lab only: no live migration, and a disk is lost with its node.
+{{- end }}
+{{- if .Values.multus.enabled }}
+
+Multus is on: attach VMs to a VLAN with a NetworkAttachmentDefinition of
+type bridge. With Cilium, cni.exclusive must be false.
+{{- end }}
+
+helm uninstall leaves the KubeVirt and CDI resources and the CRDs, so it
+never deletes VMs by accident. README.md, "Uninstall", has the order.

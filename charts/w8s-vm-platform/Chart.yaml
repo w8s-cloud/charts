@@ -1,0 +1,11 @@
+apiVersion: v2
+name: w8s-vm-platform
+description: >-
+  Reference platform: KubeVirt and CDI, at the versions w8s pinned, so a
+  cluster can run the virtual machines that cannot move to containers
+  yet. Optionally Multus, for VMs bridged onto an existing VLAN, and a
+  lab-only local-path StorageClass. Installed by a cluster admin: it
+  brings operators and CRDs.
+type: application
+version: 0.1.0
+appVersion: "1.9.1"

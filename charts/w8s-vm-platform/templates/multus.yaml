@@ -1,0 +1,20 @@
+{{- if .Values.multus.enabled }}
+{{- $upstream := "ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick" }}
+{{- $file := .Files.Get "files/multus-v4.3.2/multus-daemonset-thick.yml" }}
+{{- if not (contains $upstream $file) }}
+{{- fail "the image to pin was not found in multus-daemonset-thick.yml" }}
+{{- end }}
+{{- $file = replace $upstream .Values.multus.image $file }}
+# Multus v4.3.2, thick plugin: upstream's multus-daemonset-thick.yml with
+# its image pinned and its CRD kept on uninstall (deleting it would delete
+# every NetworkAttachmentDefinition, and with them the VMs' VLANs).
+{{- range regexSplit "(?m)^---[ \t]*$" $file -1 }}
+{{- if regexMatch "(?m)^kind: CustomResourceDefinition[ \t]*$" . }}
+---
+{{ trim . | replace "\nmetadata:\n" "\nmetadata:\n  annotations:\n    helm.sh/resource-policy: keep\n" }}
+{{- else if regexMatch "(?m)^kind: " . }}
+---
+{{ trim . }}
+{{- end }}
+{{- end }}
+{{- end }}
