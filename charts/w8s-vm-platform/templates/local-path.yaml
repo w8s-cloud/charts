@@ -1,0 +1,25 @@
+{{- if eq .Values.storage "local-path" }}
+{{- $upstream := "\"/opt/local-path-provisioner\"" }}
+{{- $file := .Files.Get "files/local-path-v0.0.37/local-path-storage.yaml" }}
+{{- if not (contains $upstream $file) }}
+{{- fail "the path to replace was not found in local-path-storage.yaml" }}
+{{- end }}
+{{- $file = replace $upstream (.Values.localPath.path | quote) $file }}
+# local-path-provisioner v0.0.37: upstream's local-path-storage.yaml with
+# three changes, the same as ops/metal-lab/addons makes: the node path,
+# Pod Security `privileged` on its namespace (its helper pods mount host
+# paths, which Talos's default `baseline` refuses), and the StorageClass
+# marked default.
+{{- range regexSplit "(?m)^---[ \t]*$" $file -1 }}
+{{- if regexMatch "(?m)^kind: Namespace[ \t]*$" . }}
+---
+{{ trim . | replace "\nmetadata:\n" "\nmetadata:\n  labels:\n    pod-security.kubernetes.io/enforce: privileged\n" }}
+{{- else if and (regexMatch "(?m)^kind: StorageClass[ \t]*$" .) $.Values.localPath.defaultClass }}
+---
+{{ trim . | replace "\nmetadata:\n" "\nmetadata:\n  annotations:\n    storageclass.kubernetes.io/is-default-class: \"true\"\n" }}
+{{- else if regexMatch "(?m)^kind: " . }}
+---
+{{ trim . }}
+{{- end }}
+{{- end }}
+{{- end }}

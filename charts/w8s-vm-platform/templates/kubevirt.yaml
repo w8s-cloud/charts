@@ -1,0 +1,30 @@
+{{- include "vmp.validate" . }}
+# KubeVirt v1.9.1: the operator, unmodified
+# (files/kubevirt-v1.9.1/kubevirt-operator.yaml, its CRD in crds/).
+{{ include "vmp.vendored" (.Files.Get "files/kubevirt-v1.9.1/kubevirt-operator.yaml") }}
+---
+# What the operator installs: upstream's kubevirt-cr.yaml, plus the
+# emulation switch and an explicit uninstall guard.
+apiVersion: kubevirt.io/v1
+kind: KubeVirt
+metadata:
+  name: kubevirt
+  namespace: kubevirt
+  labels:
+    {{- include "vmp.labels" . | nindent 4 }}
+  annotations:
+    # Deleting this removes KubeVirt from the cluster. helm uninstall
+    # leaves it; README.md, "Uninstall", says the order.
+    helm.sh/resource-policy: keep
+spec:
+  certificateRotateStrategy: {}
+  configuration:
+    developerConfiguration:
+      featureGates: []
+      useEmulation: {{ .Values.emulation }}
+    imagePullPolicy: IfNotPresent
+  customizeComponents: {}
+  imagePullPolicy: IfNotPresent
+  # Refuse to uninstall while any VM exists (KubeVirt's default, stated).
+  uninstallStrategy: BlockUninstallIfWorkloadsExist
+  workloadUpdateStrategy: {}

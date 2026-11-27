@@ -1,0 +1,35 @@
+# Install once per cluster, as a cluster admin, into a namespace of its
+# own (not kubevirt, cdi or local-path-storage: the chart creates those).
+# See README.md.
+
+# Run VMs in software (QEMU's TCG) instead of KVM. Only for nodes without
+# /dev/kvm, such as nodes that are themselves VMs without nested
+# virtualisation: VMs boot, slowly. Leave off on real servers.
+emulation: false
+
+# Where VM disks (CDI's DataVolumes) live.
+#   none        bring your own default StorageClass (Rook-Ceph, or a SAN's
+#               CSI driver). Live migration needs one with RWX block volumes.
+#   local-path  rancher's local-path-provisioner as the default
+#               StorageClass. Lab only: a disk lives on one node, so a VM
+#               cannot live-migrate and is lost with its node. On Talos it
+#               needs a user volume first (README.md, "local-path on Talos").
+storage: none
+
+localPath:
+  # The directory on each node. /var/mnt/<volume name> is where Talos
+  # mounts a user volume; the upstream default (/opt/...) is read-only
+  # on Talos.
+  path: /var/mnt/local-path-provisioner
+  # Mark the local-path StorageClass as the cluster's default.
+  defaultClass: true
+
+# Multus, so a VM can have a second interface bridged onto an existing
+# VLAN (a NetworkAttachmentDefinition of type bridge). Off by default: VMs
+# on the pod network need nothing more. With Cilium, set its
+# cni.exclusive=false first (README.md, "Multus").
+multus:
+  enabled: false
+  # The upstream manifest ships a floating `snapshot-thick` tag even at
+  # the release tag; this is the release's own image, by digest.
+  image: ghcr.io/k8snetworkplumbingwg/multus-cni:v4.3.2-thick@sha256:109b885d8752fe7a7bc3b2371750bfad6789b8b8e2d0b0820b337386ba9b93c9

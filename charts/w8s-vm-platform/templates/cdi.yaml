@@ -1,0 +1,30 @@
+# CDI v1.66.1: the operator, unmodified
+# (files/cdi-v1.66.1/cdi-operator.yaml, its CRD in crds/).
+{{ include "vmp.vendored" (.Files.Get "files/cdi-v1.66.1/cdi-operator.yaml") }}
+---
+# What the operator installs: upstream's cdi-cr.yaml, plus an explicit
+# uninstall guard.
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: CDI
+metadata:
+  name: cdi
+  labels:
+    {{- include "vmp.labels" . | nindent 4 }}
+  annotations:
+    # Deleting this removes CDI from the cluster. helm uninstall leaves
+    # it; README.md, "Uninstall", says the order.
+    helm.sh/resource-policy: keep
+spec:
+  config:
+    featureGates:
+    - HonorWaitForFirstConsumer
+  imagePullPolicy: IfNotPresent
+  infra:
+    nodeSelector:
+      kubernetes.io/os: linux
+  # Refuse to uninstall while DataVolumes exist (CDI's own default
+  # removes them).
+  uninstallStrategy: BlockUninstallIfWorkloadsExist
+  workload:
+    nodeSelector:
+      kubernetes.io/os: linux
